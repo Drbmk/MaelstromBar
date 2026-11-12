@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Build output
+*.zip
+dist/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Local tooling
+.claude/
+.superpowers/

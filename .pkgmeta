@@ -1,0 +1,7 @@
+package-as: MaelstromBar
+
+ignore:
+  - assets
+  - .gitignore
+  - .pkgmeta
+  - .git
