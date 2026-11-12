@@ -20,7 +20,7 @@ jobs:
           fetch-depth: 0   # le packager lit l'historique pour le changelog
 
       - name: Package and release
-        uses: BigWigsMods/packager@v2
+        uses: BigWigsMods/packager@01e8631a69c69d7654c788d152630d5fed9e3812 # v2.7.0
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}       # token API CurseForge
           GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}   # fourni automatiquement par GitHub
