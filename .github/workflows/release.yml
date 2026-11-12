@@ -1,0 +1,26 @@
+name: Release
+
+# Publie l'addon sur CurseForge et GitHub Releases quand on pousse un tag de version.
+# Exemple : git tag v1.0.1 && git push origin v1.0.1
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # necessaire pour creer la release GitHub
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # le packager lit l'historique pour le changelog
+
+      - name: Package and release
+        uses: BigWigsMods/packager@v2
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}       # token API CurseForge
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}   # fourni automatiquement par GitHub
