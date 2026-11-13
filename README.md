@@ -8,7 +8,7 @@ Author: **Petitcorps**
 
 ![MaelstromBar: 0 to 5 stacks, and the glow on the Lightning Bolt button at 5 stacks](assets/preview.png)
 
-Default look: blue squares for 1 to 4 stacks, light cyan at 5 stacks, and a golden pulsing glow on the Lightning Bolt button when you reach 5. Every color is configurable in the options panel.
+Default look: blue squares for 1 to 4 stacks, light cyan at 5 stacks, and a bright golden pulsing glow on the Lightning Bolt button when you reach 5. Every color is configurable in the options panel.
 
 ## Features
 
@@ -26,7 +26,7 @@ On recent clients, addons can no longer read the player's buffs during combat. M
 
 - On login, the addon enables the Cooldown Manager if needed and tries to add Maelstrom Weapon to the tracked buffs by itself.
 - If the buff is still not tracked, the bar shows a **red warning** underneath it. Add Maelstrom Weapon to the tracked buffs in the Cooldown Manager settings, or type `/mw setup` to retry and see what failed.
-- The action-bar glow at 5 stacks only works out of combat on these clients, since the addon cannot compare a hidden value.
+- The action-bar glow at 5 stacks works in combat too: like the squares, it is driven directly by the hidden stack count.
 
 ## Installation
 
@@ -55,8 +55,6 @@ If the addon is flagged as out of date, tick "Load out of date AddOns".
 | `/mw reset` | Reset the position |
 | `/mw setup` | Check the Cooldown Manager and try to track Maelstrom Weapon in it (out of combat) |
 | `/mw debug` | List active buffs (name, stacks, ID) |
-| `/mw cdm [seconds]` | Diagnostic: dump the Cooldown Manager items, optionally after a delay |
-
 ## Troubleshooting
 
 - **The bar stays empty in combat:** make sure Maelstrom Weapon is in the Cooldown Manager's tracked buffs (a red warning under the bar tells you when it is not), then type `/mw setup`.
