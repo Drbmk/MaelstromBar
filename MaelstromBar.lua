@@ -1,5 +1,5 @@
 -- MaelstromBar by Petitcorps : Maelstrom Weapon stack bar (Retail style), standalone.
--- Commands: /mw options | move | lock | always | color | glow | glowspell | glowframe | reset | scale <n> | test <0-5> | aura <name> | debug
+-- Commands: /mw options | move | lock | always | color | glow | glowspell | glowframe | reset | scale <n> | test <0-5> | aura <name> | setup | debug | cdm
 
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
@@ -49,9 +49,20 @@ if GetLocale() == "frFR" then
         ["position reset"] = "position réinitialisée",
         ["test "] = "test ",
         ["aura name = "] = "nom d'aura = ",
+        ["this client does not need the Cooldown Manager"] = "ce client n'a pas besoin du Cooldown Manager",
+        ["not available in combat"] = "indisponible en combat",
+        ["Maelstrom Weapon is not tracked in the Cooldown Manager.\nThe bar stays empty in combat.  /mw setup"] = "Arme du Maelström n'est pas suivie dans le Cooldown Manager.\nLa barre reste vide en combat.  /mw setup",
+        ["Cooldown Manager enabled: "] = "Cooldown Manager activé : ",
+        ["Maelstrom Weapon is tracked in the Cooldown Manager"] = "Arme du Maelström est suivie dans le Cooldown Manager",
+        ["Maelstrom Weapon added to the Cooldown Manager"] = "Arme du Maelström ajoutée au Cooldown Manager",
+        ["Maelstrom Weapon is not tracked in the Cooldown Manager: the bar will stay empty in combat. Add it to the tracked buffs in the Cooldown Manager settings."] = "Arme du Maelström n'est pas suivie dans le Cooldown Manager : la barre restera vide en combat. Ajoute-la aux buffs suivis dans les réglages du Cooldown Manager.",
     }
 end
-local function T(s) return LOC[s] or s end
+-- Nom du "Cooldown Manager" tel que le client l'affiche dans ses menus
+local CDM_NAME = (type(COOLDOWN_VIEWER_LABEL) == "string" and COOLDOWN_VIEWER_LABEL)
+    or (GetLocale() == "frFR" and "Gestionnaire de temps de recharge") or "Cooldown Manager"
+CDM_NAME = CDM_NAME:gsub("%%", "%%%%")
+local function T(s) return ((LOC[s] or s):gsub("Cooldown Manager", CDM_NAME)) end
 
 local DEFAULTS = {
     point = "CENTER", relPoint = "CENTER", x = 0, y = -150,
@@ -65,7 +76,7 @@ local DEFAULTS = {
 }
 
 -- IDs connus du buff "Maelstrom Weapon" (stacks). Complete par le nom si besoin.
-local SPELL_IDS = { [408505] = true, [53817] = true }
+local SPELL_IDS = { [408505] = true, [53817] = true, [344179] = true }
 local NAMES = {
     ["maelstrom weapon"] = true,
     ["arme du maelstrom"] = true,
@@ -97,27 +108,226 @@ local function IsMaelstromAura(name, spellId)
     return false
 end
 
-local function ReadStacks()
-    -- Lecture directe par ID (la plus fiable, y compris en combat)
-    if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
-        for id in pairs(SPELL_IDS) do
-            local a = C_UnitAuras.GetPlayerAuraBySpellID(id)
-            if a then
-                local c = a.applications
-                if c and c > 0 then return c end
-                return 1
+-- En combat, ce client masque les auras du joueur ("secret") : la lecture par ID
+-- renvoie nil et le balayage par index est refuse. La barre n'est donc fiable
+-- que hors combat ; en combat elle retombe a 0 sans erreur.
+local function AurasSecret()
+    return C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret()
+end
+
+-- En combat : le Cooldown Manager de Blizzard a le droit de lire l'aura. On retrouve
+-- son icone Maelstrom Weapon et on lui emprunte les donnees d'aura ("applications"
+-- est alors une valeur secrete, affichable par les StatusBar).
+local CDM_SPELLS = { [408498] = true, [408505] = true, [53817] = true, [344179] = true }
+local CDM_VIEWERS = { "BuffIconCooldownViewer", "BuffBarCooldownViewer" }
+
+local function Plain(v) -- valeur utilisable dans un test (ni nil ni secrete)
+    if v == nil or (issecretvalue and issecretvalue(v)) then return nil end
+    return v
+end
+
+local function Has(v) -- non nil, sans comparer une valeur secrete
+    return (issecretvalue and issecretvalue(v)) or v ~= nil
+end
+
+local function IsMaelstromItem(f)
+    local function try(m)
+        if not f[m] then return nil end
+        local ok, r = pcall(f[m], f)
+        return ok and Plain(r) or nil
+    end
+    local a, b = try("GetSpellID"), try("GetAuraSpellID")
+    if (a and CDM_SPELLS[a]) or (b and CDM_SPELLS[b]) then return true end
+    local ci = f.cooldownInfo
+    if type(ci) == "table" then
+        local s, o = Plain(ci.spellID), Plain(ci.overrideSpellID)
+        if (s and CDM_SPELLS[s]) or (o and CDM_SPELLS[o]) then return true end
+    end
+    return false
+end
+
+local function ReadFromCooldownManager()
+    for _, vn in ipairs(CDM_VIEWERS) do
+        local v = _G[vn]
+        if v then
+            local items
+            if v.GetItemFrames then
+                local ok, r = pcall(v.GetItemFrames, v)
+                if ok then items = r end
+            end
+            items = items or { v:GetChildren() }
+            for _, f in ipairs(items) do
+                if IsMaelstromItem(f) then
+                    for _, m in ipairs({ "GetAuraData", "GetAuraDataCached" }) do
+                        if f[m] then
+                            local ok, d = pcall(f[m], f)
+                            if ok and type(d) == "table" and Has(d.applications) then return d.applications end
+                        end
+                    end
+                    if f.GetAuraSpellInstanceID then
+                        local ok, id = pcall(f.GetAuraSpellInstanceID, f)
+                        if ok and Has(id) then
+                            local ok2, d = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, "player", id)
+                            if ok2 and type(d) == "table" and Has(d.applications) then return d.applications end
+                        end
+                    end
+                end
             end
         end
     end
-    if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
-        for i = 1, 40 do
-            local a = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
-            if not a then break end
-            if IsMaelstromAura(a.name, a.spellId) then
-                return a.applications or 1
+    return nil
+end
+
+---------------------------------------------------------------- reglage auto du Cooldown Manager
+-- La lecture en combat depend de l'icone Maelstrom Weapon du Cooldown Manager :
+-- on verifie qu'il est actif et que le buff y est suivi, et on tente de le regler.
+local setupDone = false    -- la verification de connexion a eu lieu
+local cdmMissing = false   -- vrai : buff non suivi, avertissement affiche sur la barre
+local RefreshCDMWarning    -- defini plus bas (a besoin de la barre)
+
+local function HasMaelstromItem()
+    for _, vn in ipairs(CDM_VIEWERS) do
+        local v = _G[vn]
+        if v then
+            local items
+            if v.GetItemFrames then
+                local ok, r = pcall(v.GetItemFrames, v)
+                if ok then items = r end
+            end
+            for _, f in ipairs(items or { v:GetChildren() }) do
+                if IsMaelstromItem(f) then return true end
             end
         end
+    end
+    return false
+end
+
+-- cooldownID du buff dans le catalogue du Cooldown Manager (toutes categories)
+local function FindMaelstromCooldownID()
+    local C = C_CooldownViewer
+    if not (C and C.GetCooldownViewerCategorySet and C.GetCooldownViewerCooldownInfo) then return nil end
+    for _, cat in pairs(Enum and Enum.CooldownViewerCategory or {}) do
+        local ok, ids = pcall(C.GetCooldownViewerCategorySet, cat, true)
+        if ok and type(ids) == "table" then
+            for _, id in ipairs(ids) do
+                local ok2, info = pcall(C.GetCooldownViewerCooldownInfo, id)
+                if ok2 and type(info) == "table" then
+                    local hit = CDM_SPELLS[Plain(info.spellID) or 0] or CDM_SPELLS[Plain(info.overrideSpellID) or 0]
+                    if not hit and type(info.linkedSpellIDs) == "table" then
+                        for _, s in ipairs(info.linkedSpellIDs) do
+                            if CDM_SPELLS[Plain(s) or 0] then hit = true end
+                        end
+                    end
+                    if hit then return id, cat end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- verbose : detaille chaque etape (commande /mw setup) ; sinon un seul message si echec
+local function SetupCooldownManager(verbose)
+    if not (C_Secrets and C_Secrets.ShouldAurasBeSecret) then
+        if verbose then print(PREFIX .. T("this client does not need the Cooldown Manager")) end
+        return
+    end
+    if InCombatLockdown and InCombatLockdown() then
+        if verbose then print(PREFIX .. T("not available in combat")) end
+        return
+    end
+    local function say(s) if verbose then print(PREFIX .. s) end end
+
+    -- 1) activer le Cooldown Manager
+    local getCV = (C_CVar and C_CVar.GetCVar) or GetCVar
+    local setCV = (C_CVar and C_CVar.SetCVar) or SetCVar
+    local okG, cur = pcall(getCV, "cooldownViewerEnabled")
+    if okG and cur == "0" then
+        local okS = pcall(setCV, "cooldownViewerEnabled", "1")
+        say(T("Cooldown Manager enabled: ") .. tostring(okS))
+    else
+        say("cooldownViewerEnabled=" .. tostring(okG and cur or "?"))
+    end
+
+    -- 2) deja suivi ?
+    if HasMaelstromItem() then
+        say(T("Maelstrom Weapon is tracked in the Cooldown Manager"))
+        RefreshCDMWarning()
+        return
+    end
+
+    -- 3) tenter de l'ajouter aux buffs suivis
+    local id, cat = FindMaelstromCooldownID()
+    local target = Enum and Enum.CooldownViewerCategory and Enum.CooldownViewerCategory.TrackedBuff
+    say("cooldownID=" .. tostring(id) .. " cat=" .. tostring(cat) .. " TrackedBuff=" .. tostring(target))
+    local done = false
+    local S = CooldownViewerSettings
+    if id and target ~= nil and S then
+        local okP, dp = pcall(function() return S.GetDataProvider and S:GetDataProvider() end)
+        say("settings=true dataProvider=" .. tostring(okP and dp ~= nil)
+            .. " SetCooldownToCategory=" .. tostring(okP and dp and dp.SetCooldownToCategory ~= nil))
+        if okP and dp and dp.SetCooldownToCategory then
+            local okC, err = pcall(dp.SetCooldownToCategory, dp, id, target)
+            say("SetCooldownToCategory ok=" .. tostring(okC) .. (okC and "" or (" " .. tostring(err))))
+            if okC then
+                for _, m in ipairs({ "MarkDirty", "SaveCurrentLayout", "SaveLayouts" }) do
+                    local o = dp[m] and dp or (S.GetLayoutManager and S:GetLayoutManager())
+                    if o and o[m] then say(m .. " ok=" .. tostring(pcall(o[m], o))) end
+                end
+                for _, m in ipairs({ "RefreshLayout", "Refresh" }) do
+                    if S[m] then pcall(S[m], S) end
+                end
+                done = true
+            end
+        end
+    else
+        say("settings=" .. tostring(S ~= nil))
+    end
+
+    -- 4) verifier un peu plus tard, et prevenir si le buff n'est toujours pas suivi
+    C_Timer.After(1, function()
+        RefreshCDMWarning()
+        if not cdmMissing then
+            print(PREFIX .. T("Maelstrom Weapon added to the Cooldown Manager"))
+        else
+            print(PREFIX .. T("Maelstrom Weapon is not tracked in the Cooldown Manager: the bar will stay empty in combat. Add it to the tracked buffs in the Cooldown Manager settings.")
+                .. (done and "" or " (/mw setup)"))
+        end
+    end)
+end
+
+local function ReadStacks()
+    -- Lecture directe par ID (la plus fiable). "applications" peut etre une valeur
+    -- secrete (liste blanche Blizzard) : on la renvoie telle quelle, la StatusBar l'accepte.
+    if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
+        for id in pairs(SPELL_IDS) do
+            local okA, a = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
+            if okA and a then
+                local c = a.applications
+                if issecretvalue and issecretvalue(c) then return c end
+                if not (c and c > 0) then c = 1 end
+                return c
+            end
+        end
+    end
+    if AurasSecret() then
+        local v = ReadFromCooldownManager()
+        if v ~= nil then return v end
         return 0
+    end
+    if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
+        -- pcall : le balayage peut etre refuse (taint / valeurs secretes)
+        local ok, res = pcall(function()
+            for i = 1, 40 do
+                local a = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
+                if not a then break end
+                if IsMaelstromAura(a.name, a.spellId) then
+                    return a.applications or 1
+                end
+            end
+            return 0
+        end)
+        return ok and res or 0
     end
     local wrath = BUILD >= 30000 and BUILD < 40000
     for i = 1, 40 do
@@ -174,11 +384,20 @@ for i = 1, MAX_STACKS do
     sq.bg:SetPoint("BOTTOMRIGHT", -1, 1)
     SetColor(sq.bg, 0.08, 0.1, 0.15, 0.8)
 
-    sq.fill = sq:CreateTexture(nil, "ARTWORK")
-    sq.fill:SetPoint("TOPLEFT", 2, -2)
-    sq.fill:SetPoint("BOTTOMRIGHT", -2, 2)
-    SetColor(sq.fill, 0, 0.6, 1, 1)
-    sq.fill:Hide()
+    -- StatusBar : accepte une valeur "secret" (combat) sans comparaison cote addon.
+    -- sb se remplit quand stacks >= i ; sbFull (4..5) ne se remplit qu'a 5 stacks.
+    local function MakeBar(lo, hi, level)
+        local s = CreateFrame("StatusBar", nil, sq)
+        s:SetPoint("TOPLEFT", 2, -2)
+        s:SetPoint("BOTTOMRIGHT", -2, 2)
+        s:SetFrameLevel(sq:GetFrameLevel() + level)
+        s:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+        s:SetMinMaxValues(lo, hi)
+        s:SetValue(lo)
+        return s
+    end
+    sq.fill = MakeBar(i - 1, i, 1)
+    sq.fullFill = MakeBar(MAX_STACKS - 1, MAX_STACKS, 2)
 
     squares[i] = sq
 end
@@ -196,6 +415,14 @@ SetColor(overlay.tex, 0.2, 0.8, 0.3, 0.35)
 overlay.label = overlay:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 overlay.label:SetPoint("BOTTOM", overlay, "TOP", 0, 2)
 overlay.label:SetText(T("MaelstromBar - drag to move"))
+
+-- Avertissement visible sous la barre quand le buff n'est pas suivi par le Cooldown Manager
+local warn = bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+warn:SetPoint("TOP", bar, "BOTTOM", 0, -4)
+warn:SetWidth(260)
+warn:SetTextColor(1, 0.25, 0.2)
+warn:SetText(T("Maelstrom Weapon is not tracked in the Cooldown Manager.\nThe bar stays empty in combat.  /mw setup"))
+warn:Hide()
 
 overlay:SetScript("OnDragStart", function() bar:StartMoving() end)
 overlay:SetScript("OnDragStop", function()
@@ -347,25 +574,37 @@ local function Update()
     if not db then return end
     local stacks = GetStacks()
     local inCombat = UnitAffectingCombat("player")
-    RefreshGlow(stacks)
+    local secret = issecretvalue and issecretvalue(stacks)
 
-    if unlocked or db.alwaysShow or stacks > 0 or inCombat then
+    -- Valeur secrete : aucune comparaison possible (pas de halo, barre toujours visible)
+    if not secret then RefreshGlow(stacks) end
+
+    if cdmMissing then warn:Show() else warn:Hide() end
+    if unlocked or db.alwaysShow or inCombat or secret or cdmMissing or stacks > 0 then
         bar:Show()
     else
         bar:Hide()
         return
     end
 
-    local full = stacks >= MAX_STACKS
-    local c = full and db.colorFull or db.colorNormal
+    local n, f = db.colorNormal, db.colorFull
     for i = 1, MAX_STACKS do
         local sq = squares[i]
-        if i <= stacks then
-            SetColor(sq.fill, c[1], c[2], c[3], 1)
-            sq.fill:Show()
-        else
-            sq.fill:Hide()
-        end
+        sq.fill:SetStatusBarColor(n[1], n[2], n[3], 1)
+        sq.fullFill:SetStatusBarColor(f[1], f[2], f[3], 1)
+        sq.fill:SetValue(stacks)
+        sq.fullFill:SetValue(stacks)
+    end
+end
+
+RefreshCDMWarning = function()
+    -- inutile sur les clients sans auras secretes ; pas de verification en combat
+    if not (C_Secrets and C_Secrets.ShouldAurasBeSecret) then return end
+    if UnitAffectingCombat("player") then return end
+    local missing = not HasMaelstromItem()
+    if missing ~= cdmMissing then
+        cdmMissing = missing
+        Update()
     end
 end
 
@@ -575,6 +814,7 @@ ev:SetScript("OnEvent", function(self, event, unit)
             end
         end
 
+        db.castSpell = nil -- reste d'une ancienne calibration, plus utilise
         local _, class = UnitClass("player")
         if class ~= "SHAMAN" then return end
         active = true
@@ -605,9 +845,14 @@ ev:SetScript("OnEvent", function(self, event, unit)
             EditModeManagerFrame:HookScript("OnHide", function() SetUnlocked(false) end)
         end
         Update()
+        -- laisse le temps au Cooldown Manager de creer ses icones avant de verifier
+        if C_Timer and C_Timer.After then
+            C_Timer.After(5, function() setupDone = true; pcall(SetupCooldownManager, false) end)
+        end
     elseif event == "UNIT_AURA" then
         if unit == "player" then Update() end
     else
+        if event == "PLAYER_REGEN_ENABLED" and setupDone then RefreshCDMWarning() end
         glowDirty = true -- barres d'action modifiees : relire les boutons
         Update()
     end
@@ -624,6 +869,60 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
     if cmd == "move" or cmd == "unlock" then
         SetUnlocked(not unlocked)
         print(PREFIX .. (unlocked and T("unlocked (drag the bar)") or T("locked")))
+    elseif cmd == "setup" then
+        SetupCooldownManager(true)
+    elseif cmd == "cdm" and tonumber(arg) then
+        print("|cffff8800MW cdm:|r mesure dans " .. arg .. " s")
+        C_Timer.After(tonumber(arg), function() SlashCmdList["MAELSTROMBAR"]("cdm") end)
+    elseif cmd == "cdm" then
+        -- sonde : lit les elements du Cooldown Manager (panneau de buffs) de Blizzard
+        local P = "|cffff8800MW cdm:|r "
+        local function show(v) return (issecretvalue and issecretvalue(v)) and "<secret>" or tostring(v) end
+        local viewers = { "BuffIconCooldownViewer", "BuffBarCooldownViewer", "EssentialCooldownViewer", "UtilityCooldownViewer" }
+        print(P .. "combat=" .. tostring(UnitAffectingCombat("player")))
+        for _, vn in ipairs(viewers) do
+            local v = _G[vn]
+            local items = {}
+            if v then
+                if v.GetItemFrames then
+                    local ok, r = pcall(v.GetItemFrames, v)
+                    if ok and r then items = r end
+                end
+                if #items == 0 then for _, f in ipairs({ v:GetChildren() }) do items[#items + 1] = f end end
+            end
+            print(P .. vn .. " present=" .. tostring(v ~= nil) .. " items=" .. #items)
+            for i, f in ipairs(items) do
+                if i > 10 then break end
+                local sid
+                if f.GetSpellID then local ok, r = pcall(f.GetSpellID, f); sid = ok and r end
+                if not sid and f.cooldownInfo then sid = f.cooldownInfo.spellID or f.cooldownInfo.overrideSpellID end
+                local aid = f.auraInstanceID or (f.GetAuraSpellInstanceID and f:GetAuraSpellInstanceID())
+                local apps = "nil"
+                if aid then
+                    local ok, d = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, "player", aid)
+                    apps = ok and d and show(d.applications) or ("err/nil ok=" .. tostring(ok))
+                end
+                local txt = f.Applications and f.Applications.Applications and f.Applications.Applications.GetText
+                    and f.Applications.Applications:GetText()
+                print(P .. "  " .. i .. " shown=" .. tostring(f:IsShown()) .. " spell=" .. show(sid) .. " auraID=" .. show(aid)
+                    .. " apps=" .. apps .. " text=" .. show(txt))
+                if vn == "BuffIconCooldownViewer" or vn == "BuffBarCooldownViewer" then
+                    local function call(m, ...)
+                        if not f[m] then return "absent" end
+                        local ok, r = pcall(f[m], f, ...)
+                        if not ok then return "err" end
+                        if issecretvalue and issecretvalue(r) then return "<secret>" end
+                        if type(r) == "table" then
+                            return "{apps=" .. show(r.applications) .. " spellId=" .. show(r.spellId) .. "}"
+                        end
+                        return tostring(r)
+                    end
+                    print(P .. "    auraSpell=" .. call("GetAuraSpellID") .. " instID=" .. call("GetAuraSpellInstanceID")
+                        .. " data=" .. call("GetAuraData") .. " cached=" .. call("GetAuraDataCached")
+                        .. " appsText=" .. call("GetApplicationsText") .. " unit=" .. call("GetAuraDataUnit"))
+                end
+            end
+        end
     elseif cmd == "debug" then
         print(PREFIX .. T("active buffs (index, name, stacks, id)"))
         local n = 0
