@@ -18,6 +18,15 @@ Default look: blue squares for 1 to 4 stacks, light cyan at 5 stacks, and a gold
 - **Glow** on your Lightning Bolt action-bar button at 5 stacks (option).
 - Options panel in the AddOns menu: colors, scale, glow, test.
 - Works in every client language (the buff is detected by spell ID 408505, with a localized-name fallback).
+- **Works in combat** on clients that hide player auras from addons ("secret values"): the stacks are read through Blizzard's Cooldown Manager (see below).
+
+## In combat: the Cooldown Manager
+
+On recent clients, addons can no longer read the player's buffs during combat. MaelstromBar gets around this by borrowing the stack count from the **Maelstrom Weapon icon of Blizzard's Cooldown Manager**, so that buff must stay in the Cooldown Manager's tracked buffs.
+
+- On login, the addon enables the Cooldown Manager if needed and tries to add Maelstrom Weapon to the tracked buffs by itself.
+- If the buff is still not tracked, the bar shows a **red warning** underneath it. Add Maelstrom Weapon to the tracked buffs in the Cooldown Manager settings, or type `/mw setup` to retry and see what failed.
+- The action-bar glow at 5 stacks only works out of combat on these clients, since the addon cannot compare a hidden value.
 
 ## Installation
 
@@ -44,11 +53,14 @@ If the addon is flagged as out of date, tick "Load out of date AddOns".
 | `/mw test <0-5>` | Simulate stacks to check the display (`0` = stop) |
 | `/mw aura <name>` | Buff name to track, if detection by ID fails |
 | `/mw reset` | Reset the position |
+| `/mw setup` | Check the Cooldown Manager and try to track Maelstrom Weapon in it (out of combat) |
 | `/mw debug` | List active buffs (name, stacks, ID) |
+| `/mw cdm [seconds]` | Diagnostic: dump the Cooldown Manager items, optionally after a delay |
 
 ## Troubleshooting
 
-- **The bar stays empty in combat:** with stacks active, type `/mw debug` and check that the buff shows up. If it has another name, use `/mw aura <exact name>`.
+- **The bar stays empty in combat:** make sure Maelstrom Weapon is in the Cooldown Manager's tracked buffs (a red warning under the bar tells you when it is not), then type `/mw setup`.
+- **The bar stays empty out of combat too:** with stacks active, type `/mw debug` and check that the buff shows up. If it has another name, use `/mw aura <exact name>`.
 - **No glow:** make sure the spell is on an action bar, then try `/mw test 5`. For a button from another addon, use `/mw glowframe <FrameName>` (find the name with `/fstack`).
 - **The addon does not show up:** wrong folder, or "Load out of date AddOns" is not ticked.
 

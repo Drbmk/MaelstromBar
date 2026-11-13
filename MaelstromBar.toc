@@ -2,7 +2,7 @@
 ## Title: MaelstromBar
 ## Notes: 5-square Maelstrom Weapon stack bar for Enhancement Shamans, with an optional glow on the action-bar spell at 5 stacks. Movable via Edit Mode or /mw move.
 ## Author: Petitcorps
-## Version: 1.0
+## Version: 1.1
 ## X-Curse-Project-ID: 1800667
 ## SavedVariables: MaelstromBarDB
 
