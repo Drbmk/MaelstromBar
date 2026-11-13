@@ -1,5 +1,5 @@
 -- MaelstromBar by Petitcorps : Maelstrom Weapon stack bar (Retail style), standalone.
--- Commands: /mw options | move | lock | always | color | glow | glowspell | glowframe | reset | scale <n> | test <0-5> | aura <name> | setup | debug | cdm
+-- Commands: /mw options | move | lock | always | color | glow | glowspell | glowframe | reset | scale <n> | test <0-5> | aura <name> | setup | debug
 
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
@@ -22,7 +22,7 @@ if GetLocale() == "frFR" then
         ["Default colors"] = "Couleurs par défaut",
         ["Action-bar glow (/mw glow)"] = "Halo sur la barre d'action (/mw glow)",
         ["Glow on the spell at 5 stacks"] = "Halo lumineux sur le sort à 5 stacks",
-        ["Spell to highlight (name or ID), empty = Lightning Bolt (/mw glowspell)"] = "Sort à surligner (nom ou ID), vide = Éclair (/mw glowspell)",
+        ["Spell to highlight (name or ID), empty = Lightning Bolt (/mw glowspell)"] = "Sort à surligner (nom ou ID), vide = Eclair (/mw glowspell)",
         ["Scale (/mw scale)"] = "Taille (/mw scale)",
         ["Test (/mw test)"] = "Test (/mw test)",
         ["3 stacks"] = "3 stacks",
@@ -36,7 +36,7 @@ if GetLocale() == "frFR" then
         ["on"] = "activé",
         ["off"] = "désactivé",
         ["glow on "] = "halo sur ",
-        ["Lightning Bolt (default)"] = "Éclair (par défaut)",
+        ["Lightning Bolt (default)"] = "Eclair (par défaut)",
         ["highlighted frames: "] = "frames surlignées : ",
         ["none"] = "aucune",
         ["frames cleared"] = "frames supprimées",
@@ -462,6 +462,7 @@ local function BuildGlowTargets()
             if n then glowTargets[n:lower()] = true end
         end
         glowTargets["lightning bolt"] = true
+        glowTargets["eclair"] = true -- nom frFR du sort : "Eclair", sans accent
         glowTargets[("Éclair"):lower()] = true -- lower() ne touche pas aux accents : meme traitement que le nom du jeu
     end
 end
@@ -526,19 +527,32 @@ local function GetGlowFrame(btn)
         if not w or w < 10 then w = 36 end
         local h = btn:GetHeight()
         if not h or h < 10 then h = 36 end
-        g:SetSize(w * 1.75, h * 1.75)
+        g:SetSize(w * 2.1, h * 2.1)
         g:SetPoint("CENTER", btn, "CENTER", 0, 0)
-        g.tex = g:CreateTexture(nil, "OVERLAY")
-        g.tex:SetAllPoints()
-        g.tex:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
-        g.tex:SetBlendMode("ADD")
+        -- StatusBar (4..5) : pleines a 5 stacks, vides sinon, meme avec une valeur
+        -- secrete en combat. "border" = anneau lumineux, "fill" = voile sur le bouton.
+        local function Layer(texture, sw, sh, alpha)
+            local s = CreateFrame("StatusBar", nil, g)
+            s:SetSize(sw, sh)
+            s:SetPoint("CENTER", g, "CENTER", 0, 0)
+            s:SetStatusBarTexture(texture)
+            local t = s:GetStatusBarTexture()
+            if t and t.SetBlendMode then t:SetBlendMode("ADD") end
+            s:SetAlpha(alpha)
+            s:SetMinMaxValues(MAX_STACKS - 1, MAX_STACKS)
+            s:SetValue(MAX_STACKS - 1)
+            return s
+        end
+        g.border = Layer("Interface\\Buttons\\UI-ActionButton-Border", w * 2.1, h * 2.1, 1)
+        g.border2 = Layer("Interface\\Buttons\\UI-ActionButton-Border", w * 1.8, h * 1.8, 1)
+        g.fill = Layer("Interface\\Buttons\\WHITE8X8", w, h, 0.4)
         g.ag = g:CreateAnimationGroup()
         g.ag:SetLooping("BOUNCE")
         local a = g.ag:CreateAnimation("Alpha")
         if a.SetFromAlpha then
-            a:SetFromAlpha(1); a:SetToAlpha(0.35)
+            a:SetFromAlpha(1); a:SetToAlpha(0.45)
         end
-        a:SetDuration(0.55)
+        a:SetDuration(0.4)
         glowFrames[btn] = g
     end
     return g
@@ -554,18 +568,30 @@ end
 
 local lastWant = false
 local function RefreshGlow(stacks)
-    local want = db.glow and stacks >= MAX_STACKS
-    if want == lastWant and not glowDirty then return end
-    lastWant, glowDirty = want, false
-    HideGlows()
-    if not want then return end
-    local c = db.colorGlow
-    for _, btn in ipairs(CollectGlowButtons()) do
-        local g = GetGlowFrame(btn)
-        g.tex:SetVertexColor(c[1], c[2], c[3])
-        g:Show()
-        g.ag:Play()
-        glowActive[btn] = true
+    -- Les halos restent poses sur les boutons tant que l'option est active ;
+    -- c'est la valeur des StatusBar qui les rend visibles a 5 stacks.
+    local want = db.glow and true or false
+    if want ~= lastWant or glowDirty then
+        lastWant, glowDirty = want, false
+        HideGlows()
+        if want then
+            local c = db.colorGlow
+            for _, btn in ipairs(CollectGlowButtons()) do
+                local g = GetGlowFrame(btn)
+                g.border:SetStatusBarColor(c[1], c[2], c[3])
+                g.border2:SetStatusBarColor(c[1], c[2], c[3])
+                g.fill:SetStatusBarColor(c[1], c[2], c[3])
+                g:Show()
+                g.ag:Play()
+                glowActive[btn] = true
+            end
+        end
+    end
+    for btn in pairs(glowActive) do
+        local g = glowFrames[btn]
+        g.border:SetValue(stacks)
+        g.border2:SetValue(stacks)
+        g.fill:SetValue(stacks)
     end
 end
 
@@ -576,8 +602,8 @@ local function Update()
     local inCombat = UnitAffectingCombat("player")
     local secret = issecretvalue and issecretvalue(stacks)
 
-    -- Valeur secrete : aucune comparaison possible (pas de halo, barre toujours visible)
-    if not secret then RefreshGlow(stacks) end
+    -- Valeur secrete : aucune comparaison possible (barre toujours visible)
+    RefreshGlow(stacks)
 
     if cdmMissing then warn:Show() else warn:Hide() end
     if unlocked or db.alwaysShow or inCombat or secret or cdmMissing or stacks > 0 then
@@ -814,7 +840,6 @@ ev:SetScript("OnEvent", function(self, event, unit)
             end
         end
 
-        db.castSpell = nil -- reste d'une ancienne calibration, plus utilise
         local _, class = UnitClass("player")
         if class ~= "SHAMAN" then return end
         active = true
@@ -871,58 +896,6 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         print(PREFIX .. (unlocked and T("unlocked (drag the bar)") or T("locked")))
     elseif cmd == "setup" then
         SetupCooldownManager(true)
-    elseif cmd == "cdm" and tonumber(arg) then
-        print("|cffff8800MW cdm:|r mesure dans " .. arg .. " s")
-        C_Timer.After(tonumber(arg), function() SlashCmdList["MAELSTROMBAR"]("cdm") end)
-    elseif cmd == "cdm" then
-        -- sonde : lit les elements du Cooldown Manager (panneau de buffs) de Blizzard
-        local P = "|cffff8800MW cdm:|r "
-        local function show(v) return (issecretvalue and issecretvalue(v)) and "<secret>" or tostring(v) end
-        local viewers = { "BuffIconCooldownViewer", "BuffBarCooldownViewer", "EssentialCooldownViewer", "UtilityCooldownViewer" }
-        print(P .. "combat=" .. tostring(UnitAffectingCombat("player")))
-        for _, vn in ipairs(viewers) do
-            local v = _G[vn]
-            local items = {}
-            if v then
-                if v.GetItemFrames then
-                    local ok, r = pcall(v.GetItemFrames, v)
-                    if ok and r then items = r end
-                end
-                if #items == 0 then for _, f in ipairs({ v:GetChildren() }) do items[#items + 1] = f end end
-            end
-            print(P .. vn .. " present=" .. tostring(v ~= nil) .. " items=" .. #items)
-            for i, f in ipairs(items) do
-                if i > 10 then break end
-                local sid
-                if f.GetSpellID then local ok, r = pcall(f.GetSpellID, f); sid = ok and r end
-                if not sid and f.cooldownInfo then sid = f.cooldownInfo.spellID or f.cooldownInfo.overrideSpellID end
-                local aid = f.auraInstanceID or (f.GetAuraSpellInstanceID and f:GetAuraSpellInstanceID())
-                local apps = "nil"
-                if aid then
-                    local ok, d = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, "player", aid)
-                    apps = ok and d and show(d.applications) or ("err/nil ok=" .. tostring(ok))
-                end
-                local txt = f.Applications and f.Applications.Applications and f.Applications.Applications.GetText
-                    and f.Applications.Applications:GetText()
-                print(P .. "  " .. i .. " shown=" .. tostring(f:IsShown()) .. " spell=" .. show(sid) .. " auraID=" .. show(aid)
-                    .. " apps=" .. apps .. " text=" .. show(txt))
-                if vn == "BuffIconCooldownViewer" or vn == "BuffBarCooldownViewer" then
-                    local function call(m, ...)
-                        if not f[m] then return "absent" end
-                        local ok, r = pcall(f[m], f, ...)
-                        if not ok then return "err" end
-                        if issecretvalue and issecretvalue(r) then return "<secret>" end
-                        if type(r) == "table" then
-                            return "{apps=" .. show(r.applications) .. " spellId=" .. show(r.spellId) .. "}"
-                        end
-                        return tostring(r)
-                    end
-                    print(P .. "    auraSpell=" .. call("GetAuraSpellID") .. " instID=" .. call("GetAuraSpellInstanceID")
-                        .. " data=" .. call("GetAuraData") .. " cached=" .. call("GetAuraDataCached")
-                        .. " appsText=" .. call("GetApplicationsText") .. " unit=" .. call("GetAuraDataUnit"))
-                end
-            end
-        end
     elseif cmd == "debug" then
         print(PREFIX .. T("active buffs (index, name, stacks, id)"))
         local n = 0
