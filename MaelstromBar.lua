@@ -146,7 +146,36 @@ local function IsMaelstromItem(f)
     return false
 end
 
+local cdmItem      -- icone du Cooldown Manager trouvee (cachee : evite de rebalayer a chaque lecture)
+local cdmCooldown  -- lectures restantes avant un nouveau balayage complet apres un echec
+
+local function ReadAuraFromFrame(f)
+    for _, m in ipairs({ "GetAuraData", "GetAuraDataCached" }) do
+        if f[m] then
+            local ok, d = pcall(f[m], f)
+            if ok and type(d) == "table" and Has(d.applications) then return d.applications end
+        end
+    end
+    if f.GetAuraSpellInstanceID then
+        local ok, id = pcall(f.GetAuraSpellInstanceID, f)
+        if ok and Has(id) then
+            local ok2, d = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, "player", id)
+            if ok2 and type(d) == "table" and Has(d.applications) then return d.applications end
+        end
+    end
+    return nil
+end
+
 local function ReadFromCooldownManager()
+    -- icone cachee d'abord : lecture directe, rapide, des que le buff est suivi
+    if cdmItem then
+        local v = ReadAuraFromFrame(cdmItem)
+        if v ~= nil then return v end
+        cdmItem = nil -- buff tombe ou icone retiree : il faut rechercher l'icone
+    elseif cdmCooldown and cdmCooldown > 0 then
+        cdmCooldown = cdmCooldown - 1
+        return nil
+    end
     for _, vn in ipairs(CDM_VIEWERS) do
         local v = _G[vn]
         if v then
@@ -158,23 +187,17 @@ local function ReadFromCooldownManager()
             items = items or { v:GetChildren() }
             for _, f in ipairs(items) do
                 if IsMaelstromItem(f) then
-                    for _, m in ipairs({ "GetAuraData", "GetAuraDataCached" }) do
-                        if f[m] then
-                            local ok, d = pcall(f[m], f)
-                            if ok and type(d) == "table" and Has(d.applications) then return d.applications end
-                        end
-                    end
-                    if f.GetAuraSpellInstanceID then
-                        local ok, id = pcall(f.GetAuraSpellInstanceID, f)
-                        if ok and Has(id) then
-                            local ok2, d = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, "player", id)
-                            if ok2 and type(d) == "table" and Has(d.applications) then return d.applications end
-                        end
+                    local val = ReadAuraFromFrame(f)
+                    if val ~= nil then
+                        cdmItem, cdmCooldown = f, nil
+                        return val
                     end
                 end
             end
         end
     end
+    -- aucune icone Maelstrom visible : patienter un peu avant de tout rebalayer
+    cdmCooldown = 2
     return nil
 end
 
@@ -634,6 +657,21 @@ RefreshCDMWarning = function()
     end
 end
 
+---------------------------------------------------------------- mise a jour en temps reel
+-- Les seuls evenements d'auras ne suffisent pas : UNIT_AURA est retarde (maj
+-- regroupees) sur les clients recents, et peut etre muet en combat sur ceux qui
+-- cachent les auras du joueur. La barre restait alors figee jusqu'au prochain
+-- evenement. On complete donc par une lecture rapide et permanente (~20 fois
+-- par seconde) : quelques lectures d'aura par tick, les StatusBar acceptent les
+-- valeurs secretes, le cout est negligeable.
+local updateTicker
+local function StartRealtimeUpdates()
+    if updateTicker or not (C_Timer and C_Timer.NewTicker) then return end
+    updateTicker = C_Timer.NewTicker(0.05, function()
+        if db and active then Update() end
+    end)
+end
+
 local function ApplyPosition()
     bar:ClearAllPoints()
     bar:SetPoint(db.point, UIParent, db.relPoint, db.x, db.y)
@@ -870,6 +908,7 @@ ev:SetScript("OnEvent", function(self, event, unit)
             EditModeManagerFrame:HookScript("OnHide", function() SetUnlocked(false) end)
         end
         Update()
+        StartRealtimeUpdates()
         -- laisse le temps au Cooldown Manager de creer ses icones avant de verifier
         if C_Timer and C_Timer.After then
             C_Timer.After(5, function() setupDone = true; pcall(SetupCooldownManager, false) end)

@@ -13,6 +13,7 @@ Default look: blue squares for 1 to 4 stacks, light cyan at 5 stacks, and a brig
 ## Features
 
 - 5 squares that fill up with your stacks, with a different color at 5 stacks.
+- Real-time refresh: aura events are backed by a fast polling loop (~20 readings per second), even when the client throttles aura events or hides them in combat.
 - Shown with at least 1 stack or in combat, or always (option).
 - Movable through the interface **Edit Mode** if your client has one, otherwise with `/mw move`.
 - **Glow** on your Lightning Bolt action-bar button at 5 stacks (option).
