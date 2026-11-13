@@ -54,7 +54,6 @@ if GetLocale() == "frFR" then
         ["Maelstrom Weapon is not tracked in the Cooldown Manager.\nThe bar stays empty in combat.  /mw setup"] = "Arme du Maelström n'est pas suivie dans le Cooldown Manager.\nLa barre reste vide en combat.  /mw setup",
         ["Cooldown Manager enabled: "] = "Cooldown Manager activé : ",
         ["Maelstrom Weapon is tracked in the Cooldown Manager"] = "Arme du Maelström est suivie dans le Cooldown Manager",
-        ["Maelstrom Weapon added to the Cooldown Manager"] = "Arme du Maelström ajoutée au Cooldown Manager",
         ["Maelstrom Weapon is not tracked in the Cooldown Manager: the bar will stay empty in combat. Add it to the tracked buffs in the Cooldown Manager settings."] = "Arme du Maelström n'est pas suivie dans le Cooldown Manager : la barre restera vide en combat. Ajoute-la aux buffs suivis dans les réglages du Cooldown Manager.",
     }
 end
@@ -150,11 +149,14 @@ local cdmItem      -- icone du Cooldown Manager trouvee (cachee : evite de rebal
 local cdmCooldown  -- lectures restantes avant un nouveau balayage complet apres un echec
 
 local function ReadAuraFromFrame(f)
-    for _, m in ipairs({ "GetAuraData", "GetAuraDataCached" }) do
-        if f[m] then
-            local ok, d = pcall(f[m], f)
-            if ok and type(d) == "table" and Has(d.applications) then return d.applications end
-        end
+    -- Lecture seule : on n'appelle pas GetAuraData. Cette methode peut rafraichir
+    -- le cache de l'icone depuis notre contexte "tainted" ; Blizzard relit alors
+    -- des donnees contaminees dans son propre code et plante en combat
+    -- ("attempt to compare a secret number value"). Seules les lectures pures
+    -- sont autorisees : le cache, puis l'ID d'instance via l'API C.
+    if f.GetAuraDataCached then
+        local ok, d = pcall(f.GetAuraDataCached, f)
+        if ok and type(d) == "table" and Has(d.applications) then return d.applications end
     end
     if f.GetAuraSpellInstanceID then
         local ok, id = pcall(f.GetAuraSpellInstanceID, f)
@@ -201,9 +203,11 @@ local function ReadFromCooldownManager()
     return nil
 end
 
----------------------------------------------------------------- reglage auto du Cooldown Manager
+---------------------------------------------------------------- verification du Cooldown Manager
 -- La lecture en combat depend de l'icone Maelstrom Weapon du Cooldown Manager :
--- on verifie qu'il est actif et que le buff y est suivi, et on tente de le regler.
+-- on verifie qu'il est actif et que le buff y est suivi, puis on previent.
+-- Interdit d'y ecrire depuis l'addon : les reglages du Cooldown Manager doivent
+-- etre modifies a la main dans les options du jeu, sinon son code est "tainted".
 local setupDone = false    -- la verification de connexion a eu lieu
 local cdmMissing = false   -- vrai : buff non suivi, avertissement affiche sur la barre
 local RefreshCDMWarning    -- defini plus bas (a besoin de la barre)
@@ -279,42 +283,22 @@ local function SetupCooldownManager(verbose)
         return
     end
 
-    -- 3) tenter de l'ajouter aux buffs suivis
-    local id, cat = FindMaelstromCooldownID()
-    local target = Enum and Enum.CooldownViewerCategory and Enum.CooldownViewerCategory.TrackedBuff
-    say("cooldownID=" .. tostring(id) .. " cat=" .. tostring(cat) .. " TrackedBuff=" .. tostring(target))
-    local done = false
-    local S = CooldownViewerSettings
-    if id and target ~= nil and S then
-        local okP, dp = pcall(function() return S.GetDataProvider and S:GetDataProvider() end)
-        say("settings=true dataProvider=" .. tostring(okP and dp ~= nil)
-            .. " SetCooldownToCategory=" .. tostring(okP and dp and dp.SetCooldownToCategory ~= nil))
-        if okP and dp and dp.SetCooldownToCategory then
-            local okC, err = pcall(dp.SetCooldownToCategory, dp, id, target)
-            say("SetCooldownToCategory ok=" .. tostring(okC) .. (okC and "" or (" " .. tostring(err))))
-            if okC then
-                for _, m in ipairs({ "MarkDirty", "SaveCurrentLayout", "SaveLayouts" }) do
-                    local o = dp[m] and dp or (S.GetLayoutManager and S:GetLayoutManager())
-                    if o and o[m] then say(m .. " ok=" .. tostring(pcall(o[m], o))) end
-                end
-                for _, m in ipairs({ "RefreshLayout", "Refresh" }) do
-                    if S[m] then pcall(S[m], S) end
-                end
-                done = true
-            end
-        end
-    else
-        say("settings=" .. tostring(S ~= nil))
-    end
+    -- 3) pas d'ajout automatique : ecrire dans les reglages du Cooldown Manager
+    -- depuis un addon contamine ses donnees, et le code Blizzard plante ensuite
+    -- en combat ("attempt to compare a secret number value (execution tainted
+    -- by 'MaelstromBar')"). L'ajout du buff aux buffs suivis se fait a la main
+    -- dans les options du jeu ; on se contente de verifier et d'indiquer quoi
+    -- faire si le buff n'y est pas.
+    local id = FindMaelstromCooldownID()
+    say("cooldownID=" .. tostring(id))
 
     -- 4) verifier un peu plus tard, et prevenir si le buff n'est toujours pas suivi
     C_Timer.After(1, function()
         RefreshCDMWarning()
-        if not cdmMissing then
-            print(PREFIX .. T("Maelstrom Weapon added to the Cooldown Manager"))
-        else
-            print(PREFIX .. T("Maelstrom Weapon is not tracked in the Cooldown Manager: the bar will stay empty in combat. Add it to the tracked buffs in the Cooldown Manager settings.")
-                .. (done and "" or " (/mw setup)"))
+        if cdmMissing then
+            print(PREFIX .. T("Maelstrom Weapon is not tracked in the Cooldown Manager: the bar will stay empty in combat. Add it to the tracked buffs in the Cooldown Manager settings."))
+        elseif verbose then
+            print(PREFIX .. T("Maelstrom Weapon is tracked in the Cooldown Manager"))
         end
     end)
 end
