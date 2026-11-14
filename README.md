@@ -55,9 +55,12 @@ If the addon is flagged as out of date, tick "Load out of date AddOns".
 | `/mw aura <name>` | Buff name to track, if detection by ID fails |
 | `/mw reset` | Reset the position |
 | `/mw setup` | Check the Cooldown Manager and the tracking of Maelstrom Weapon (out of combat) |
+| `/mw log` | Show Lua errors recorded from the whole client; `clear`: wipe the log |
+| `/mw testerror` | Trigger a deliberate error, to check that `/mw log` records it |
 | `/mw debug` | List active buffs (name, stacks, ID) |
 ## Troubleshooting
 
+- **A Lua error flashed by and you missed it:** type `/mw log` — errors from the whole client (including Blizzard's) are recorded and can be read back, with the time, the repeat count and the call stack.
 - **The bar stays empty in combat:** make sure Maelstrom Weapon is in the Cooldown Manager's tracked buffs (a red warning under the bar tells you when it is not), then type `/mw setup`.
 - **The bar stays empty out of combat too:** with stacks active, type `/mw debug` and check that the buff shows up. If it has another name, use `/mw aura <exact name>`.
 - **No glow:** make sure the spell is on an action bar, then try `/mw test 5`. For a button from another addon, use `/mw glowframe <FrameName>` (find the name with `/fstack`).

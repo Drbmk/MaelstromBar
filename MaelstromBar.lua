@@ -1,5 +1,5 @@
 -- MaelstromBar by Petitcorps : Maelstrom Weapon stack bar (Retail style), standalone.
--- Commands: /mw options | move | lock | always | color | glow | glowspell | glowframe | reset | scale <n> | test <0-5> | aura <name> | setup | debug
+-- Commands: /mw options | move | lock | always | color | glow | glowspell | glowframe | reset | scale <n> | test <0-5> | aura <name> | setup | log | testerror | debug
 
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
@@ -49,6 +49,9 @@ if GetLocale() == "frFR" then
         ["position reset"] = "position réinitialisée",
         ["test "] = "test ",
         ["aura name = "] = "nom d'aura = ",
+        ["log cleared"] = "journal vidé",
+        ["no Lua errors recorded"] = "aucune erreur Lua enregistrée",
+        ["%d Lua error(s) recorded, most recent first (/mw log clear to wipe)"] = "%d erreur(s) Lua enregistrée(s), la plus récente d'abord (/mw log clear pour vider)",
         ["this client does not need the Cooldown Manager"] = "ce client n'a pas besoin du Cooldown Manager",
         ["not available in combat"] = "indisponible en combat",
         ["Maelstrom Weapon is not tracked in the Cooldown Manager.\nThe bar stays empty in combat.  /mw setup"] = "Arme du Maelström n'est pas suivie dans le Cooldown Manager.\nLa barre reste vide en combat.  /mw setup",
@@ -89,6 +92,11 @@ local openOptions -- defini quand le panneau d'options est construit
 local active = false -- vrai uniquement pour un chaman (l'addon ne fait rien pour les autres classes)
 
 ---------------------------------------------------------------- helpers
+local function AddonVersion()
+    if C_AddOns and C_AddOns.GetAddOnMetadata then return C_AddOns.GetAddOnMetadata("MaelstromBar", "Version") end
+    if GetAddOnMetadata then return GetAddOnMetadata("MaelstromBar", "Version") end
+end
+
 local function SetColor(tex, r, g, b, a)
     if tex.SetColorTexture then
         tex:SetColorTexture(r, g, b, a or 1)
@@ -366,6 +374,34 @@ local function GetStacks()
         print(PREFIX .. T("buff read error: ") .. tostring(res))
     end
     return 0
+end
+
+---------------------------------------------------------------- journal des erreurs Lua
+-- Une erreur qui surgit en combat est facile a rater sans BugSack. On installe
+-- un gestionnaire d'erreurs qui enregistre tout (les notres comme celles du code
+-- Blizzard, ex. taint du Cooldown Manager) dans les SavedVariables, puis on
+-- laisse la main au gestionnaire precedent (BugSack, fenetre Blizzard) pour ne
+-- rien casser. Consultation : /mw log.
+local MAX_LOGGED_ERRORS = 50
+
+local function InstallErrorLog()
+    local prev = geterrorhandler and geterrorhandler()
+    seterrorhandler(function(msg)
+        pcall(function()
+            local m = tostring(msg)
+            local stack = debugstack and debugstack(2) or ""
+            local last = db.errors and db.errors[#db.errors]
+            if last and last.msg == m then
+                last.count = (last.count or 1) + 1
+                last.t = time()
+            else
+                db.errors = db.errors or {}
+                db.errors[#db.errors + 1] = { t = time(), msg = m, stack = stack, count = 1 }
+                if #db.errors > MAX_LOGGED_ERRORS then table.remove(db.errors, 1) end
+            end
+        end)
+        if type(prev) == "function" then return prev(msg) end
+    end)
 end
 
 ---------------------------------------------------------------- frames
@@ -865,6 +901,7 @@ ev:SetScript("OnEvent", function(self, event, unit)
         local _, class = UnitClass("player")
         if class ~= "SHAMAN" then return end
         active = true
+        InstallErrorLog()
 
         -- Nom localise du sort, quelle que soit la langue du client
         local locName
@@ -919,6 +956,29 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         print(PREFIX .. (unlocked and T("unlocked (drag the bar)") or T("locked")))
     elseif cmd == "setup" then
         SetupCooldownManager(true)
+    elseif cmd == "log" then
+        -- /mw log : relire les erreurs Lua enregistrees ; /mw log clear : vider
+        db.errors = db.errors or {}
+        if arg == "clear" or arg == "vider" then
+            db.errors = {}
+            print(PREFIX .. T("log cleared"))
+        elseif #db.errors == 0 then
+            print(PREFIX .. T("no Lua errors recorded"))
+        else
+            print(PREFIX .. string.format(T("%d Lua error(s) recorded, most recent first (/mw log clear to wipe)"), #db.errors))
+            for i = #db.errors, 1, -1 do
+                local e = db.errors[i]
+                local ts = (date and date("%Y-%m-%d %H:%M:%S", e.t or 0)) or tostring(e.t or 0)
+                print(string.format("#%d x%d  %s  %s", i, e.count or 1, ts, e.msg or "?"))
+                if e.stack and e.stack ~= "" then
+                    for line in gmatch(e.stack, "[^\n]+") do print("  " .. line) end
+                end
+            end
+        end
+    elseif cmd == "testerror" then
+        -- declenche volontairement une erreur : elle doit apparaitre dans /mw log
+        -- (et dans BugSack / la fenetre d'erreurs). Permet de verifier la chaine.
+        error("MaelstromBar: test error, it should show up in /mw log")
     elseif cmd == "debug" then
         print(PREFIX .. T("active buffs (index, name, stacks, id)"))
         local n = 0
@@ -1014,6 +1074,7 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         print(PREFIX .. T("aura name = ") .. arg)
         Update()
     else
-        print(PREFIX .. "/mw options | move | lock | always | color | glow | glowspell | glowframe | reset | scale <n> | test <0-5> | aura <buff name>")
+        print(PREFIX .. "v" .. (AddonVersion() or "?")
+            .. " : /mw options | move | lock | always | color | glow | glowspell | glowframe | reset | scale <n> | test <0-5> | aura <buff name> | setup | log | testerror | debug")
     end
 end
