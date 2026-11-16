@@ -1,5 +1,5 @@
 -- MaelstromBar by Petitcorps : Maelstrom Weapon stack bar (Retail style), standalone.
--- Commands: /mw options | move | lock | always | color | glow | glowspell | glowframe | reset | scale <n> | test <0-5> | aura <name> | setup | log | testerror | debug
+-- Commands: /mw options | move | lock | always | color | glow | glowspell | glowframe | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <name> | setup | log | testerror | debug
 
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
@@ -46,7 +46,7 @@ if GetLocale() == "frFR" then
         ["options panel unavailable"] = "panneau d'options indisponible",
         ["/mw color [full] <r> <g> <b>  (values from 0 to 1)"] = "/mw color [full] <r> <g> <b>  (valeurs de 0 à 1)",
         ["always show "] = "affichage permanent ",
-        ["position reset"] = "position réinitialisée",
+        ["position and size reset"] = "position et taille réinitialisées",
         ["test "] = "test ",
         ["aura name = "] = "nom d'aura = ",
         ["log cleared"] = "journal vidé",
@@ -58,6 +58,15 @@ if GetLocale() == "frFR" then
         ["Cooldown Manager enabled: "] = "Cooldown Manager activé : ",
         ["Maelstrom Weapon is tracked in the Cooldown Manager"] = "Arme du Maelström est suivie dans le Cooldown Manager",
         ["Maelstrom Weapon is not tracked in the Cooldown Manager: the bar will stay empty in combat. Add it to the tracked buffs in the Cooldown Manager settings."] = "Arme du Maelström n'est pas suivie dans le Cooldown Manager : la barre restera vide en combat. Ajoute-la aux buffs suivis dans les réglages du Cooldown Manager.",
+        ["Square width"] = "Largeur des carrés",
+        ["Square height"] = "Hauteur des carrés",
+        ["Spacing between squares"] = "Espacement entre les carrés",
+        ["Size (/mw size)"] = "Taille (/mw size)",
+        ["Default size"] = "Taille par défaut",
+        ["size: %d x %d, spacing %d"] = "taille : %d x %d, espacement %d",
+        ["/mw size <width> <height> [spacing]  (10-80, 6-60, 0-30)"] = "/mw size <largeur> <hauteur> [espacement]  (10-80, 6-60, 0-30)",
+        ["Reset position and size (/mw reset)"] = "Réinitialiser la position et la taille (/mw reset)",
+        ["the Cooldown Manager is not ready yet, checking again..."] = "le Gestionnaire de temps de recharge n'est pas encore prêt, nouvelle vérification en cours…",
     }
 end
 -- Nom du "Cooldown Manager" tel que le client l'affiche dans ses menus
@@ -69,6 +78,7 @@ local function T(s) return ((LOC[s] or s):gsub("Cooldown Manager", CDM_NAME)) en
 local DEFAULTS = {
     point = "CENTER", relPoint = "CENTER", x = 0, y = -150,
     scale = 1, auraName = nil, alwaysShow = false,
+    sqW = SQ_W, sqH = SQ_H, sqGap = SQ_GAP,
     colorNormal = { 0, 0.55, 1 },
     colorFull = { 0.55, 0.95, 1 },
     glow = true,                       -- halo sur le sort a 5 stacks
@@ -220,6 +230,31 @@ local setupDone = false    -- la verification de connexion a eu lieu
 local cdmMissing = false   -- vrai : buff non suivi, avertissement affiche sur la barre
 local RefreshCDMWarning    -- defini plus bas (a besoin de la barre)
 
+-- Les frames du Cooldown Manager peuvent naitre bien apres le login (UI manette
+-- notamment) : tant qu'elles n'existent pas, ou que leurs icones ne sont pas
+-- encore creees, la verification est reprise plus tard au lieu de conclure que
+-- le buff n'est pas suivi. Sinon l'avertissement rouge apparait a tort au login
+-- et ne disparait qu'a la fin du premier combat.
+local CDM_GRACE_RETRIES = 30 -- ~60 s apres le login avant de declarer le buff non suivi
+local cdmGraceLeft = 0       -- ressais restantes de cette periode de grace
+local cdmCheckScheduled = false
+
+local function CooldownViewerExists()
+    for _, vn in ipairs(CDM_VIEWERS) do
+        if _G[vn] then return true end
+    end
+    return false
+end
+
+local function ScheduleCDMCheck(delay)
+    if cdmCheckScheduled or not (C_Timer and C_Timer.After) then return end
+    cdmCheckScheduled = true
+    C_Timer.After(delay, function()
+        cdmCheckScheduled = false
+        RefreshCDMWarning()
+    end)
+end
+
 local function HasMaelstromItem()
     for _, vn in ipairs(CDM_VIEWERS) do
         local v = _G[vn]
@@ -300,12 +335,14 @@ local function SetupCooldownManager(verbose)
     local id = FindMaelstromCooldownID()
     say("cooldownID=" .. tostring(id))
 
-    -- 4) verifier un peu plus tard, et prevenir si le buff n'est toujours pas suivi
+    -- 4) verifier un peu plus tard ; la periode de grace laisse aux icones le temps
+    -- d'apparaitre (UI manette) avant d'afficher l'avertissement
     C_Timer.After(1, function()
-        RefreshCDMWarning()
-        if cdmMissing then
-            print(PREFIX .. T("Maelstrom Weapon is not tracked in the Cooldown Manager: the bar will stay empty in combat. Add it to the tracked buffs in the Cooldown Manager settings."))
-        elseif verbose then
+        if verbose then cdmGraceLeft = 0 end -- diagnostic demande : reponse immediate
+        local status = RefreshCDMWarning()
+        if status == "pending" and verbose then
+            print(PREFIX .. T("the Cooldown Manager is not ready yet, checking again..."))
+        elseif status == "tracked" and verbose then
             print(PREFIX .. T("Maelstrom Weapon is tracked in the Cooldown Manager"))
         end
     end)
@@ -473,6 +510,23 @@ overlay:SetScript("OnDragStop", function()
     local p, _, rp, x, y = bar:GetPoint()
     db.point, db.relPoint, db.x, db.y = p, rp, x, y
 end)
+
+-- Taille des carres (largeur, hauteur, espacement) : reglable dans le panneau
+-- d'options et par /mw size. La longueur totale de la barre en decoule :
+-- 5 largeurs + 4 espacements.
+local function ApplySize()
+    if not db then return end
+    local w = db.sqW or SQ_W
+    local h = db.sqH or SQ_H
+    local gap = db.sqGap or SQ_GAP
+    bar:SetSize(MAX_STACKS * w + (MAX_STACKS - 1) * gap, h)
+    for i = 1, MAX_STACKS do
+        local sq = squares[i]
+        sq:SetSize(w, h)
+        sq:ClearAllPoints()
+        sq:SetPoint("LEFT", bar, "LEFT", (i - 1) * (w + gap), 0)
+    end
+end
 
 ---------------------------------------------------------------- halo sur la barre d'action
 local glowDirty = true
@@ -670,11 +724,36 @@ RefreshCDMWarning = function()
     -- inutile sur les clients sans auras secretes ; pas de verification en combat
     if not (C_Secrets and C_Secrets.ShouldAurasBeSecret) then return end
     if UnitAffectingCombat("player") then return end
+    if not CooldownViewerExists() then
+        -- frames pas encore creees (login lent, UI manette) : reverifier plus tard,
+        -- sans afficher l'avertissement pour autant
+        if cdmGraceLeft > 0 then
+            cdmGraceLeft = cdmGraceLeft - 1
+            ScheduleCDMCheck(2)
+        end
+        return "pending"
+    end
     local missing = not HasMaelstromItem()
+    if missing and cdmGraceLeft > 0 then
+        -- icones pas encore apparues : laisser a Blizzard le temps de les creer
+        cdmGraceLeft = cdmGraceLeft - 1
+        ScheduleCDMCheck(2)
+        return "pending"
+    end
     if missing ~= cdmMissing then
         cdmMissing = missing
+        if missing then
+            print(PREFIX .. T("Maelstrom Weapon is not tracked in the Cooldown Manager: the bar will stay empty in combat. Add it to the tracked buffs in the Cooldown Manager settings."))
+        end
         Update()
     end
+    if cdmMissing then
+        -- l'icone peut apparaitre plus tard (reglages modifies, UI manette) :
+        -- reverifier regulierement, l'avertissement disparait alors tout seul,
+        -- sans attendre la fin d'un combat
+        ScheduleCDMCheck(10)
+    end
+    return missing and "missing" or "tracked"
 end
 
 ---------------------------------------------------------------- mise a jour en temps reel
@@ -845,6 +924,31 @@ local function BuildOptions()
     Button(T("Stop"), 76, 420, y, function() testStacks = nil; Update() end)
     y = y - 36
 
+    Label(T("Size (/mw size)"), "GameFontNormal"); y = y - 26
+    local function Stepper(text, key, lo, hi)
+        Label(T(text), "GameFontHighlight", 20, y)
+        local val = Label("", "GameFontHighlight", 230, y - 6)
+        local function Set(v)
+            v = math.max(lo, math.min(hi, math.floor(v + 0.5)))
+            db[key] = v
+            ApplySize()
+            val:SetText(tostring(v))
+        end
+        refreshers[#refreshers + 1] = function() val:SetText(tostring(db[key])) end
+        Button("-", 30, 260, y, function() Set(db[key] - 1) end)
+        Button("+", 30, 300, y, function() Set(db[key] + 1) end)
+        y = y - 26
+    end
+    Stepper("Square width", "sqW", 10, 80)
+    Stepper("Square height", "sqH", 6, 60)
+    Stepper("Spacing between squares", "sqGap", 0, 30)
+    Button(T("Default size"), 120, 20, y, function()
+        db.sqW, db.sqH, db.sqGap = SQ_W, SQ_H, SQ_GAP
+        ApplySize()
+        for _, f in ipairs(refreshers) do f() end
+    end)
+    y = y - 36
+
     Label(T("Buff name to track (/mw aura), leave empty by default"), "GameFontNormal"); y = y - 28
     local eb = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
     eb:SetSize(220, 22)
@@ -859,8 +963,10 @@ local function BuildOptions()
     refreshers[#refreshers + 1] = function() eb:SetText(db.auraName or "") end
     y = y - 40
 
-    Button(T("Reset position (/mw reset)"), 230, 16, y, function()
+    Button(T("Reset position and size (/mw reset)"), 260, 16, y, function()
         db.point, db.relPoint, db.x, db.y = DEFAULTS.point, DEFAULTS.relPoint, DEFAULTS.x, DEFAULTS.y
+        db.sqW, db.sqH, db.sqGap = SQ_W, SQ_H, SQ_GAP
+        ApplySize()
         SetScale(1)
     end)
 
@@ -913,6 +1019,7 @@ ev:SetScript("OnEvent", function(self, event, unit)
         if locName then NAMES[locName:lower()] = true end
 
         ApplyPosition()
+        ApplySize()
         BuildOptions()
         BuildGlowTargets()
         for _, e in ipairs({ "ACTIONBAR_SLOT_CHANGED", "ACTIONBAR_PAGE_CHANGED", "UPDATE_BONUS_ACTIONBAR" }) do
@@ -930,9 +1037,15 @@ ev:SetScript("OnEvent", function(self, event, unit)
         end
         Update()
         StartRealtimeUpdates()
-        -- laisse le temps au Cooldown Manager de creer ses icones avant de verifier
+        -- laisse le temps au Cooldown Manager de creer ses frames et ses icones
+        -- avant de verifier ; avec l'UI manette elles apparaissent tard, d'ou la
+        -- periode de grace (~60 s) pendant laquelle on reessaie sans prevenir
         if C_Timer and C_Timer.After then
-            C_Timer.After(5, function() setupDone = true; pcall(SetupCooldownManager, false) end)
+            C_Timer.After(5, function()
+                setupDone = true
+                cdmGraceLeft = CDM_GRACE_RETRIES
+                pcall(SetupCooldownManager, false)
+            end)
         end
     elseif event == "UNIT_AURA" then
         if unit == "player" then Update() end
@@ -1053,8 +1166,22 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         print(PREFIX .. T("locked"))
     elseif cmd == "reset" then
         db.point, db.relPoint, db.x, db.y, db.scale = DEFAULTS.point, DEFAULTS.relPoint, DEFAULTS.x, DEFAULTS.y, 1
+        db.sqW, db.sqH, db.sqGap = SQ_W, SQ_H, SQ_GAP
         ApplyPosition()
-        print(PREFIX .. T("position reset"))
+        ApplySize()
+        print(PREFIX .. T("position and size reset"))
+    elseif cmd == "size" or cmd == "taille" then
+        -- /mw size <largeur> <hauteur> [espacement] : dimensions des carres
+        local w, h, g = arg:match("(%d+)%s+(%d+)%s*(%d*)")
+        w, h, g = tonumber(w), tonumber(h), tonumber(g)
+        if w and h and w >= 10 and w <= 80 and h >= 6 and h <= 60 then
+            db.sqW, db.sqH = w, h
+            if g and g >= 0 and g <= 30 then db.sqGap = g end
+            ApplySize()
+            print(PREFIX .. string.format(T("size: %d x %d, spacing %d"), db.sqW, db.sqH, db.sqGap))
+        else
+            print(PREFIX .. T("/mw size <width> <height> [spacing]  (10-80, 6-60, 0-30)"))
+        end
     elseif cmd == "scale" then
         local s = tonumber(arg)
         if s and s >= 0.5 and s <= 3 then
@@ -1075,6 +1202,6 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         Update()
     else
         print(PREFIX .. "v" .. (AddonVersion() or "?")
-            .. " : /mw options | move | lock | always | color | glow | glowspell | glowframe | reset | scale <n> | test <0-5> | aura <buff name> | setup | log | testerror | debug")
+            .. " : /mw options | move | lock | always | color | glow | glowspell | glowframe | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <buff name> | setup | log | testerror | debug")
     end
 end
