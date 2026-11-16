@@ -26,7 +26,7 @@ Default look: blue squares for 1 to 4 stacks, light cyan at 5 stacks, and a brig
 On recent clients, addons can no longer read the player's buffs during combat. MaelstromBar gets around this by borrowing the stack count from the **Maelstrom Weapon icon of Blizzard's Cooldown Manager**, so that buff must stay in the Cooldown Manager's tracked buffs.
 
 - On login, the addon enables the Cooldown Manager if needed and checks that Maelstrom Weapon is tracked. It does **not** modify the tracked buffs by itself: writing into the Cooldown Manager's settings from an addon taints Blizzard's code and causes errors in combat. Add Maelstrom Weapon to the tracked buffs by hand, in the game's options.
-- If the buff is not tracked, the bar shows a **red warning** underneath it. Add Maelstrom Weapon to the tracked buffs in the Cooldown Manager settings, or type `/mw setup` to check again and see details.
+- If the buff is not tracked, the bar shows a **red warning** underneath it. Add Maelstrom Weapon to the tracked buffs in the Cooldown Manager settings, or type `/mw setup` to check again and see details. After login, the check waits for the Cooldown Manager's icons to appear (they can be slow to show up, especially with the Controller UI) and keeps re-checking, so the warning also clears on its own as soon as the buff becomes tracked.
 - The action-bar glow at 5 stacks works in combat too: like the squares, it is driven directly by the hidden stack count.
 
 ## Installation
