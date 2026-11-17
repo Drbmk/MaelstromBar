@@ -1,5 +1,5 @@
 -- MaelstromBar by Petitcorps : Maelstrom Weapon stack bar (Retail style), standalone.
--- Commands: /mw options | move | lock | always | color | glow | glowspell | glowframe | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <name> | setup | log | testerror | debug
+-- Commands: /mw options | move | lock | always | warn | color | glow | glowspell | glowframe | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <name> | setup | log | testerror | debug
 
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
@@ -33,6 +33,8 @@ if GetLocale() == "frFR" then
         ["locked"] = "verrouillée",
         ["active buffs (index, name, stacks, id)"] = "buffs actifs (index, nom, stacks, id)",
         ["glow "] = "halo ",
+        ["warning "] = "avertissement ",
+        ["Show the Cooldown Manager warning (red text under the bar, /mw warn)"] = "Afficher l'avertissement du Gestionnaire de temps de recharge (texte rouge sous la barre, /mw warn)",
         ["on"] = "activé",
         ["off"] = "désactivé",
         ["glow on "] = "halo sur ",
@@ -78,6 +80,7 @@ local function T(s) return ((LOC[s] or s):gsub("Cooldown Manager", CDM_NAME)) en
 local DEFAULTS = {
     point = "CENTER", relPoint = "CENTER", x = 0, y = -150,
     scale = 1, auraName = nil, alwaysShow = false,
+    warnCDM = true,                     -- texte rouge si le buff n'est pas suivi
     sqW = SQ_W, sqH = SQ_H, sqGap = SQ_GAP,
     colorNormal = { 0, 0.55, 1 },
     colorFull = { 0.55, 0.95, 1 },
@@ -339,7 +342,7 @@ local function SetupCooldownManager(verbose)
     -- d'apparaitre (UI manette) avant d'afficher l'avertissement
     C_Timer.After(1, function()
         if verbose then cdmGraceLeft = 0 end -- diagnostic demande : reponse immediate
-        local status = RefreshCDMWarning()
+        local status = RefreshCDMWarning(verbose)
         if status == "pending" and verbose then
             print(PREFIX .. T("the Cooldown Manager is not ready yet, checking again..."))
         elseif status == "tracked" and verbose then
@@ -571,13 +574,64 @@ local function SpellMatches(spellId)
     return n and glowTargets[n:lower()] or false
 end
 
+-- Macros : le texte est lu et le sort a surligner y est cherche. Les macros
+-- avec #showtooltip, les conditions [nobuff:...] et les sequences
+-- (/castsequence reset=5 Sort1, Sort2) sont gerees ; /cast Sort1; Sort2 aussi.
+local function MacroBody(macroId)
+    if GetMacroBody then
+        local ok, body = pcall(GetMacroBody, macroId)
+        if ok and type(body) == "string" then return body end
+    end
+    if GetMacroInfo then
+        local ok, _, _, body = pcall(GetMacroInfo, macroId)
+        if ok and type(body) == "string" then return body end
+    end
+    return nil
+end
+
+local MACRO_CAST = {
+    ["cast"] = true, ["use"] = true, ["spell"] = true,
+    ["lancer"] = true, ["utiliser"] = true, -- commandes frFR
+}
+
+local function MacroClauseMatches(clause)
+    clause = clause:gsub("^%s+", ""):gsub("%s+$", "")
+    if clause == "" then return false end
+    local id = tonumber(clause)
+    if id and glowTargets[id] then return true end
+    return glowTargets[clause] == true
+end
+
+local function MacroMatches(macroId)
+    local body = MacroBody(macroId)
+    if not body then return false end
+    for line in gmatch(body, "[^\r\n]+") do
+        line = line:lower():gsub("^%s+", "")
+        local cmd, rest = line:match("^/(%a+)%s*(.*)$")
+        if cmd and rest ~= "" then
+            rest = rest:gsub("%b[]%s*", "") -- conditions [combat], [nobuff:...] ignorees
+            if MACRO_CAST[cmd] then
+                for clause in gmatch(rest, "([^;]+)") do
+                    if MacroClauseMatches(clause) then return true end
+                end
+            elseif cmd == "castsequence" then
+                rest = rest:gsub("reset=%s*[%w%/]+%s*", "")
+                for clause in gmatch(rest, "([^,]+)") do
+                    if MacroClauseMatches(clause) then return true end
+                end
+            end
+        end
+    end
+    return false
+end
+
 local function SlotMatches(slot)
     if not slot then return false end
     local t, id = GetActionInfo(slot)
     if t == "spell" then
         return SpellMatches(id)
-    elseif t == "macro" and GetMacroSpell then
-        return SpellMatches(GetMacroSpell(id))
+    elseif t == "macro" then
+        return MacroMatches(id)
     end
     return false
 end
@@ -693,6 +747,18 @@ local function RefreshGlow(stacks)
 end
 
 ---------------------------------------------------------------- logique
+-- Buff Maelstrom actif et lisible ? (hors combat). Retourne nil si la lecture
+-- est impossible. Sert a ne prevenir que lorsque l'absence d'icone du Cooldown
+-- Manager est reelle : sans buff actif, l'icone peut simplement ne pas exister
+-- (elle n'apparait parfois qu'avec le buff actif, UI manette notamment).
+local function MaelstromBuffActive()
+    if AurasSecret() then return nil end
+    local ok, res = pcall(ReadStacks)
+    if not ok then return nil end
+    if issecretvalue and issecretvalue(res) then return nil end
+    return (res or 0) > 0
+end
+
 local function Update()
     if not db then return end
     local stacks = GetStacks()
@@ -702,8 +768,9 @@ local function Update()
     -- Valeur secrete : aucune comparaison possible (barre toujours visible)
     RefreshGlow(stacks)
 
-    if cdmMissing then warn:Show() else warn:Hide() end
-    if unlocked or db.alwaysShow or inCombat or secret or cdmMissing or stacks > 0 then
+    local showWarn = cdmMissing and db.warnCDM and true or false
+    if showWarn then warn:Show() else warn:Hide() end
+    if unlocked or db.alwaysShow or inCombat or secret or showWarn or stacks > 0 then
         bar:Show()
     else
         bar:Hide()
@@ -720,7 +787,8 @@ local function Update()
     end
 end
 
-RefreshCDMWarning = function()
+RefreshCDMWarning = function(force)
+    -- force (commande /mw setup) : repondre meme sans buff actif
     -- inutile sur les clients sans auras secretes ; pas de verification en combat
     if not (C_Secrets and C_Secrets.ShouldAurasBeSecret) then return end
     if UnitAffectingCombat("player") then return end
@@ -734,15 +802,26 @@ RefreshCDMWarning = function()
         return "pending"
     end
     local missing = not HasMaelstromItem()
-    if missing and cdmGraceLeft > 0 then
-        -- icones pas encore apparues : laisser a Blizzard le temps de les creer
-        cdmGraceLeft = cdmGraceLeft - 1
-        ScheduleCDMCheck(2)
-        return "pending"
+    if missing then
+        local active = MaelstromBuffActive()
+        if active == nil or (not active and not force) then
+            -- Buff absent ou illisible : l'icone du Cooldown Manager n'existe
+            -- parfois qu'avec le buff actif (UI manette notamment). Sans certitude
+            -- que le suivi manque vraiment, pas d'avertissement ; on reessaie.
+            if cdmMissing then cdmMissing = false; Update() end
+            ScheduleCDMCheck(10)
+            return "pending"
+        end
+        if cdmGraceLeft > 0 then
+            -- buff actif mais icones pas encore apparues : laisser le temps
+            cdmGraceLeft = cdmGraceLeft - 1
+            ScheduleCDMCheck(2)
+            return "pending"
+        end
     end
     if missing ~= cdmMissing then
         cdmMissing = missing
-        if missing then
+        if missing and (db.warnCDM or force) then
             print(PREFIX .. T("Maelstrom Weapon is not tracked in the Cooldown Manager: the bar will stay empty in combat. Add it to the tracked buffs in the Cooldown Manager settings."))
         end
         Update()
@@ -872,6 +951,8 @@ local function BuildOptions()
         function() return unlocked end, function(v) SetUnlocked(v) end)
     Check(T("Always show the bar (/mw always)"),
         function() return db.alwaysShow end, function(v) db.alwaysShow = v; Update() end)
+    Check(T("Show the Cooldown Manager warning (red text under the bar, /mw warn)"),
+        function() return db.warnCDM end, function(v) db.warnCDM = v; Update() end)
 
     y = y - 6
     Label(T("Colors (/mw color)"), "GameFontNormal"); y = y - 26
@@ -1161,6 +1242,11 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         db.alwaysShow = not db.alwaysShow
         Update()
         print(PREFIX .. T("always show ") .. (db.alwaysShow and T("on") or T("off")))
+    elseif cmd == "warn" then
+        -- /mw warn : afficher ou non le texte rouge du Cooldown Manager
+        db.warnCDM = not db.warnCDM
+        Update()
+        print(PREFIX .. T("warning ") .. (db.warnCDM and T("on") or T("off")))
     elseif cmd == "lock" then
         SetUnlocked(false)
         print(PREFIX .. T("locked"))
@@ -1202,6 +1288,6 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         Update()
     else
         print(PREFIX .. "v" .. (AddonVersion() or "?")
-            .. " : /mw options | move | lock | always | color | glow | glowspell | glowframe | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <buff name> | setup | log | testerror | debug")
+            .. " : /mw options | move | lock | always | warn | color | glow | glowspell | glowframe | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <buff name> | setup | log | testerror | debug")
     end
 end
