@@ -66,6 +66,7 @@ The bar can be resized in two ways, which combine:
 | `/mw log` | Show Lua errors recorded from the whole client; `clear`: wipe the log |
 | `/mw testerror` | Trigger a deliberate error, to check that `/mw log` records it |
 | `/mw debug` | List active buffs (name, stacks, ID) |
+
 ## Troubleshooting
 
 - **A Lua error flashed by and you missed it:** type `/mw log` — errors from the whole client (including Blizzard's) are recorded and can be read back, with the time, the repeat count and the call stack.
