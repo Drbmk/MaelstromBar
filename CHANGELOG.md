@@ -5,6 +5,7 @@
 - Fixed: the red "Maelstrom Weapon is not tracked in the Cooldown Manager" warning could still appear while idling in town after login (seen with the Controller UI). The Cooldown Manager's icon apparently only exists while the buff is active on that UI, so an icon missing with no buff active is not proof that tracking is broken. The warning is now shown only when it is certain: the buff must be active (readable out of combat) while the icon is missing. When the buff is not active, the check stays silent and keeps retrying.
 - New: the warning can be disabled entirely — `/mw warn` or a checkbox in the options panel ("Show the Cooldown Manager warning"). `/mw setup` still reports the tracking status even when the warning is off.
 - Fixed: the action-bar glow now works for macros. The glow used to rely on a `GetMacroSpell` API that does not exist, so a button bound to a macro (for example with `#showtooltip`) could never light up. The macro text is now parsed: `/cast`, `/use`, `/castsequence`, several spells separated by `;` or `,`, and the French commands `/lancer` and `/utiliser` are supported; conditions in `[brackets]` are ignored.
+- Fixed: the glow now also finds buttons that are not on a known action bar, such as the Controller UI's buttons: all global buttons are scanned (by action slot or by spell attribute) in addition to the known bars. New command `/mw glowscan` lists the buttons the addon can currently highlight, to diagnose what is found (or not) on non-standard UIs.
 
 ## 1.3.0
 

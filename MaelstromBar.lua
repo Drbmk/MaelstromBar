@@ -1,5 +1,5 @@
 -- MaelstromBar by Petitcorps : Maelstrom Weapon stack bar (Retail style), standalone.
--- Commands: /mw options | move | lock | always | warn | color | glow | glowspell | glowframe | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <name> | setup | log | testerror | debug
+-- Commands: /mw options | move | lock | always | warn | color | glow | glowspell | glowframe | glowscan | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <name> | setup | log | testerror | debug
 
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
@@ -45,6 +45,8 @@ if GetLocale() == "frFR" then
         ["warning: frame '%s' does not exist (yet)"] = "attention, la frame '%s' n'existe pas (encore)",
         ["frame %s removed"] = "frame %s retirée",
         ["frame %s added"] = "frame %s ajoutée",
+        ["no button found for the glow; hover the button and use /fstack, then /mw glowframe <FrameName>"] = "aucun bouton trouvé pour le halo ; survole le bouton avec /fstack, puis /mw glowframe <NomDeFrame>",
+        ["%d button(s) found for the glow:"] = "%d bouton(s) trouvé(s) pour le halo :",
         ["options panel unavailable"] = "panneau d'options indisponible",
         ["/mw color [full] <r> <g> <b>  (values from 0 to 1)"] = "/mw color [full] <r> <g> <b>  (valeurs de 0 à 1)",
         ["always show "] = "affichage permanent ",
@@ -650,10 +652,47 @@ local function ButtonAction(btn)
     return tonumber(a)
 end
 
+-- Boutons d'UI non standard (UI manette notamment) : les prefixes de barres
+-- connus ne couvrent pas leurs frames. On balaye les boutons globaux et on
+-- retient ceux dont l'action (slot) ou le sort (attribut "spell") correspond.
+-- Le balayage est mis en cache 5 s : il n'est refait qu'au besoin.
+local globalButtons
+local globalButtonsTime = 0
+
+local function FrameMatchesGlow(f)
+    local ok, a = pcall(ButtonAction, f)
+    local slot = ok and tonumber(a) or nil
+    if slot and SlotMatches(slot) then return true end
+    if f.GetAttribute then
+        local okS, sp = pcall(f.GetAttribute, f, "spell")
+        if okS and type(sp) == "number" then return SpellMatches(sp) end
+        if okS and type(sp) == "string" then
+            return glowTargets[sp:lower()] == true or glowTargets[tonumber(sp)] == true
+        end
+    end
+    return false
+end
+
+local function GlobalButtons()
+    if globalButtons and (time() - globalButtonsTime) < 5 then return globalButtons end
+    local found = {}
+    for _, f in pairs(_G) do
+        if type(f) == "table" and f.GetAttribute and f.IsShown then
+            local ok, isBtn = pcall(f.IsObjectType, f, "Button")
+            if ok and isBtn then found[#found + 1] = f end
+        end
+    end
+    globalButtons, globalButtonsTime = found, time() or 0
+    return found
+end
+
 local function CollectGlowButtons()
-    local list = {}
+    local list, seen = {}, {}
     local function Try(btn)
-        if btn and btn.IsShown and SlotMatches(ButtonAction(btn)) then list[#list + 1] = btn end
+        if btn and btn.IsShown and not seen[btn] and SlotMatches(ButtonAction(btn)) then
+            seen[btn] = true
+            list[#list + 1] = btn
+        end
     end
     for _, p in ipairs(BAR_PREFIXES) do
         for i = 1, p[2] do Try(_G[p[1] .. i]) end
@@ -664,7 +703,15 @@ local function CollectGlowButtons()
     -- frames explicites (ex. bouton de OneButton) : surlignees telles quelles
     for _, name in ipairs(db.extraFrames or {}) do
         local f = _G[name]
-        if f and f.IsShown then list[#list + 1] = f end
+        if f and f.IsShown and not seen[f] then seen[f] = true; list[#list + 1] = f end
+    end
+    -- filet de securite pour les UI non standard (UI manette notamment) :
+    -- boutons globaux dont l'action ou le sort correspond
+    for _, f in ipairs(GlobalButtons()) do
+        if not seen[f] and FrameMatchesGlow(f) then
+            local ok, shown = pcall(f.IsShown, f)
+            if ok and shown then seen[f] = true; list[#list + 1] = f end
+        end
     end
     return list
 end
@@ -1223,6 +1270,18 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
             glowDirty = true; Update()
             print(PREFIX .. string.format(found and T("frame %s removed") or T("frame %s added"), arg))
         end
+    elseif cmd == "glowscan" then
+        -- /mw glowscan : lister les boutons que l'addon peut surligner
+        local list = CollectGlowButtons()
+        if #list == 0 then
+            print(PREFIX .. T("no button found for the glow; hover the button and use /fstack, then /mw glowframe <FrameName>"))
+        else
+            print(PREFIX .. string.format(T("%d button(s) found for the glow:"), #list))
+            for _, btn in ipairs(list) do
+                local ok, name = pcall(btn.GetName, btn)
+                print("  " .. ((ok and name) or tostring(btn)))
+            end
+        end
     elseif cmd == "options" or cmd == "config" then
         if openOptions then openOptions() else print(PREFIX .. T("options panel unavailable")) end
     elseif cmd == "color" or cmd == "couleur" then
@@ -1288,6 +1347,6 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         Update()
     else
         print(PREFIX .. "v" .. (AddonVersion() or "?")
-            .. " : /mw options | move | lock | always | warn | color | glow | glowspell | glowframe | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <buff name> | setup | log | testerror | debug")
+            .. " : /mw options | move | lock | always | warn | color | glow | glowspell | glowframe | glowscan | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <buff name> | setup | log | testerror | debug")
     end
 end
