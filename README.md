@@ -51,16 +51,16 @@ The bar can be resized in two ways, which combine:
 | `/mw move` / `/mw lock` | Unlock / lock the bar so you can move it |
 | `/mw always` | Always show the bar, on/off |
 | `/mw warn` | Red Cooldown Manager warning under the bar, on/off |
-| `/mw color <r> <g> <b>` | Color of stacks 1 to 4 (values from 0 to 1) |
-| `/mw color full <r> <g> <b>` | Color at 5 stacks |
-| `/mw size <width> <height> [spacing]` | Square size in pixels (10-80 x 6-60, spacing 0-30) |
-| `/mw scale <0.5-3>` | Bar scale |
+| `/mw color R G B` | Color of stacks 1 to 4 (values from 0 to 1) |
+| `/mw color full R G B` | Color at 5 stacks |
+| `/mw size width height [spacing]` | Square size in pixels (10-80 x 6-60, spacing 0-30) |
+| `/mw scale 0.5-3` | Bar scale |
 | `/mw glow` | Action-bar glow on/off |
-| `/mw glowspell <name or ID>` | Spell to highlight (empty = Lightning Bolt) |
-| `/mw glowframe <FrameName>` | Add or remove a frame to highlight; no argument: list; `clear`: remove all |
+| `/mw glowspell name or ID` | Spell to highlight (empty = Lightning Bolt) |
+| `/mw glowframe FrameName` | Add or remove a frame to highlight; no argument: list; `clear`: remove all |
 | `/mw glowscan` | List the buttons the addon can currently highlight (diagnostic) |
-| `/mw test <0-5>` | Simulate stacks to check the display (`0` = stop) |
-| `/mw aura <name>` | Buff name to track, if detection by ID fails |
+| `/mw test 0-5` | Simulate stacks to check the display (`0` = stop) |
+| `/mw aura BuffName` | Buff name to track, if detection by ID fails |
 | `/mw reset` | Reset the position and the size |
 | `/mw setup` | Check the Cooldown Manager and the tracking of Maelstrom Weapon (out of combat) |
 | `/mw log` | Show Lua errors recorded from the whole client; `clear`: wipe the log |
@@ -71,8 +71,8 @@ The bar can be resized in two ways, which combine:
 
 - **A Lua error flashed by and you missed it:** type `/mw log` — errors from the whole client (including Blizzard's) are recorded and can be read back, with the time, the repeat count and the call stack.
 - **The bar stays empty in combat:** make sure Maelstrom Weapon is in the Cooldown Manager's tracked buffs (a red warning under the bar tells you when it is not — it only shows with the buff active, and can be turned off with `/mw warn`), then type `/mw setup`.
-- **The bar stays empty out of combat too:** with stacks active, type `/mw debug` and check that the buff shows up. If it has another name, use `/mw aura <exact name>`.
-- **No glow:** make sure the spell is on an action bar, then try `/mw test 5`. A button bound to a macro works too (`#showtooltip` macros, `/cast`, `/use`, `/castsequence`). Buttons outside the known bars (Controller UI, other addons) are found by a global scan; type `/mw glowscan` to see what is detected. For anything still missed, use `/mw glowframe <FrameName>` (find the name with `/fstack`).
+- **The bar stays empty out of combat too:** with stacks active, type `/mw debug` and check that the buff shows up. If it has another name, use `/mw aura "exact name"`.
+- **No glow:** make sure the spell is on an action bar, then try `/mw test 5`. A button bound to a macro works too (`#showtooltip` macros, `/cast`, `/use`, `/castsequence`). Buttons outside the known bars (Controller UI, other addons) are found by a global scan; type `/mw glowscan` to see what is detected. For anything still missed, use `/mw glowframe FrameName` (find the name with `/fstack`).
 - **The addon does not show up:** wrong folder, or "Load out of date AddOns" is not ticked.
 
 ## License
