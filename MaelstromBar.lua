@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 3 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 4 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -432,13 +432,22 @@ local function SetupCooldownManager(verbose)
                     say("cooldown info: " .. table.concat(fields, ", "))
                 end
                 local function cnt(ok, t) return (ok and type(t) == "table") and tostring(#t) or "?" end
+                local function has(ok, t)
+                    if not (ok and type(t) == "table") then return "?" end
+                    for _, cid in ipairs(t) do if cid == id then return "yes" end end
+                    return "no"
+                end
                 for name, cat in pairs(Enum and Enum.CooldownViewerCategory or {}) do
                     local okA, all = pcall(C.GetCooldownViewerCategorySet, cat, true)
                     local okT, tracked = pcall(C.GetCooldownViewerCategorySet, cat, false)
                     local okN, def = pcall(C.GetCooldownViewerCategorySet, cat)
-                    say(string.format("category %s: all=%s tracked=%s default=%s",
-                        tostring(name), cnt(okA, all), cnt(okT, tracked), cnt(okN, def)))
+                    say(string.format("category %s (%s): all=%s/%s tracked=%s/%s default=%s/%s",
+                        tostring(name), tostring(cat),
+                        cnt(okA, all), has(okA, all),
+                        cnt(okT, tracked), has(okT, tracked),
+                        cnt(okN, def), has(okN, def)))
                 end
+                say("info.category=" .. tostring(Plain(info and info.category)))
             end
         end)
         if not okDump then say("catalog dump error: " .. tostring(errDump)) end
