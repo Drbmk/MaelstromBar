@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 5 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 6 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -1074,15 +1074,46 @@ local function SetUnlocked(state)
     Update()
 end
 
--- Ouvre la page des reglages du Cooldown Manager dans les options du jeu
--- (recherche de la categorie par nom, avec sous-categories). Repli : message
--- si la page n'est pas trouvee.
+-- Ouvre la page des reglages du Cooldown Manager dans les options du jeu.
+-- En cas d'echec, liste les categories vues pour diagnostiquer (commande
+-- /mw cdmsettings ou bouton du panneau d'options).
 local function OpenCDMSettings()
-    local function fail()
-        print(PREFIX .. T("Cooldown Manager settings not found: open the game options and look for them"))
+    local function listNames(names)
+        local line = {}
+        local function flush()
+            if #line > 0 then print(PREFIX .. "categories: " .. table.concat(line, ", ")) end
+            line = {}
+        end
+        for _, nm in ipairs(names) do
+            line[#line + 1] = nm
+            if #table.concat(line, ", ") > 200 then flush() end
+        end
+        flush()
     end
-    if not (Settings and Settings.GetCategories and Settings.OpenToCategory) then return fail() end
+    local function fail(names)
+        print(PREFIX .. T("Cooldown Manager settings not found: open the game options and look for them"))
+        if type(names) == "table" then
+            if #names == 0 then
+                print(PREFIX .. "Settings.GetCategories() n'a rendu aucune categorie")
+            else
+                listNames(names)
+            end
+        end
+    end
+    if not (Settings and Settings.GetCategories and Settings.OpenToCategory) then
+        print(PREFIX .. "Settings API incomplete : GetCategories="
+            .. tostring(Settings and Settings.GetCategories or nil)
+            .. ", OpenToCategory=" .. tostring(Settings and Settings.OpenToCategory or nil))
+        return
+    end
     local target = CDM_NAME:lower()
+    local function CatName(cat)
+        if cat.GetName then
+            local ok, n = pcall(cat.GetName, cat)
+            if ok and type(n) == "string" then return n end
+        end
+        return type(cat.name) == "string" and cat.name or nil
+    end
     local function Match(name)
         if type(name) ~= "string" or #name < 3 then return false end
         local n = name:lower()
@@ -1093,23 +1124,33 @@ local function OpenCDMSettings()
         if not ok then pcall(Settings.OpenToCategory, cat) end
     end
     local okS, cats = pcall(Settings.GetCategories)
-    if not okS or type(cats) ~= "table" then return fail() end
+    if not okS or type(cats) ~= "table" then
+        print(PREFIX .. "Settings.GetCategories() erreur : " .. tostring(cats))
+        return fail()
+    end
+    local names = {}
     for _, cat in ipairs(cats) do
         if type(cat) == "number" and Settings.GetCategory then
             local okC, real = pcall(Settings.GetCategory, cat)
             if okC and type(real) == "table" then cat = real end
         end
         if type(cat) == "table" then
-            if Match(cat.GetName and cat:GetName()) then Open(cat) return end
+            local n = CatName(cat)
+            names[#names + 1] = tostring(n) or "?"
+            if Match(n) then return Open(cat) end
             local okS2, subs = pcall(cat.GetSubcategories, cat)
             if okS2 and type(subs) == "table" then
                 for _, sub in ipairs(subs) do
-                    if Match(sub.GetName and sub:GetName()) then Open(sub) return end
+                    local sn = CatName(sub)
+                    names[#names + 1] = (tostring(n) or "?") .. " > " .. (tostring(sn) or "?")
+                    if Match(sn) then return Open(sub) end
                 end
             end
+        else
+            names[#names + 1] = "(" .. type(cat) .. ")"
         end
     end
-    fail()
+    fail(names)
 end
 
 ---------------------------------------------------------------- panneau d'options
@@ -1563,6 +1604,9 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
             glowDirty = true; Update()
             print(PREFIX .. string.format(found and T("frame %s removed") or T("frame %s added"), arg))
         end
+    elseif cmd == "cdmsettings" then
+        -- /mw cdmsettings : ouvre les reglages du Cooldown Manager (diagnostic)
+        OpenCDMSettings()
     elseif cmd == "glowscan" then
         -- /mw glowscan : lister les boutons que l'addon peut surligner
         local list = CollectGlowButtons()
