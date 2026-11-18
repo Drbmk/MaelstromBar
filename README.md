@@ -38,6 +38,8 @@ If the addon is flagged as out of date, tick "Load out of date AddOns".
 
 **Options > AddOns > MaelstromBar**, or `/mw options`.
 
+The panel starts with a **Cooldown Manager** section: it shows whether Maelstrom Weapon is tracked (required to read the stacks in combat) and guides you through the setup. The addon can enable the Cooldown Manager itself, but the tracked buffs must be ticked by hand in the game's options — the panel tells you exactly what to do, with a *Check again* button.
+
 The bar can be resized in two ways, which combine:
 
 - **Size** (square width, square height, spacing between squares): the total length of the bar follows from the square width and the spacing. In the options panel ("Size" section) or with `/mw size`.
@@ -70,7 +72,7 @@ The bar can be resized in two ways, which combine:
 ## Troubleshooting
 
 - **A Lua error flashed by and you missed it:** type `/mw log` — errors from the whole client (including Blizzard's) are recorded and can be read back, with the time, the repeat count and the call stack.
-- **The bar stays empty in combat:** make sure Maelstrom Weapon is in the Cooldown Manager's tracked buffs (a red warning under the bar tells you when it is not — it only shows with the buff active, and can be turned off with `/mw warn`), then type `/mw setup`. If the stacks cannot be read during combat, a chat message tells you which of the two causes it is (not tracked, or icon unreadable — in that case report it with `/mw log`).
+- **The bar stays empty in combat:** make sure Maelstrom Weapon is in the Cooldown Manager's tracked buffs — the options panel shows the status and how to fix it, and a red warning under the bar tells you when it is not (it only shows with the buff active, and can be turned off with `/mw warn`). Then type `/mw setup`; without active stacks the answer may be "cannot confirm" (on some UIs the icon only exists with the buff up) — run it right after a fight, with stacks still active, for a definitive answer. If the stacks cannot be read during combat, a chat message tells you which of the two causes it is (not tracked, or icon unreadable — in that case report it with `/mw log`).
 - **The bar stays empty out of combat too:** with stacks active, type `/mw debug` and check that the buff shows up. If it has another name, use `/mw aura "exact name"`.
 - **No glow:** make sure the spell is on an action bar, then try `/mw test 5`. A button bound to a macro works too (`#showtooltip` macros, `/cast`, `/use`, `/castsequence`). Buttons outside the known bars (Controller UI, other addons) are found by a global scan; type `/mw glowscan` to see what is detected. For anything still missed, use `/mw glowframe FrameName` (find the name with `/fstack`).
 - **The addon does not show up:** wrong folder, or "Load out of date AddOns" is not ticked.

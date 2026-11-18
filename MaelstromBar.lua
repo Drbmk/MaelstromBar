@@ -73,6 +73,15 @@ if GetLocale() == "frFR" then
         ["the Cooldown Manager is not ready yet, checking again..."] = "le Gestionnaire de temps de recharge n'est pas encore prêt, nouvelle vérification en cours…",
         ["in combat: Maelstrom Weapon is not in the Cooldown Manager, the stacks cannot be read. After combat, type /mw setup."] = "en combat : Arme du Maelström n'est pas dans le Gestionnaire de temps de recharge, les stacks sont illisibles. Hors combat, tape /mw setup.",
         ["in combat: the Maelstrom Weapon icon of the Cooldown Manager was found but its stacks could not be read; please report this with /mw log."] = "en combat : l'icône Arme du Maelström du Gestionnaire de temps de recharge est trouvée mais ses stacks sont illisibles ; signale-le avec /mw log.",
+        ["cannot confirm without Maelstrom stacks active: on some UIs the icon only exists while the buff is up. Check again right after a fight, with stacks still active."] = "impossible de confirmer sans stacks Arme du Maelström actives : sur certaines UI l'icône n'existe qu'avec le buff actif. Revérifie juste après un combat, stacks encore actives.",
+        ["Cooldown Manager (stacks in combat)"] = "Cooldown Manager (stacks en combat)",
+        ["Maelstrom Weapon is tracked in the Cooldown Manager: the bar works in combat."] = "Arme du Maelström est suivie dans le Cooldown Manager : la barre fonctionne en combat.",
+        ["Maelstrom Weapon is not tracked in the Cooldown Manager: the bar stays empty in combat."] = "Arme du Maelström n'est pas suivie dans le Cooldown Manager : la barre reste vide en combat.",
+        ["Fix: open the game options, find the Cooldown Manager settings and add Maelstrom Weapon to the tracked buffs by hand (an addon cannot change that list). Then press Check again."] = "Correction : ouvre les options du jeu, trouve les réglages du Cooldown Manager et ajoute Arme du Maelström aux buffs suivis à la main (un addon ne peut pas modifier cette liste). Appuie ensuite sur « Vérifier à nouveau ».",
+        ["The Cooldown Manager cannot be checked in combat; reopen this panel out of combat."] = "Le Cooldown Manager ne peut pas être vérifié en combat ; rouvre ce panneau hors combat.",
+        ["Cannot confirm yet: no Maelstrom stacks active, or the Cooldown Manager is still loading. If the stacks cannot be read in combat, a message in chat will say so."] = "Impossible de confirmer pour l'instant : pas de stacks Arme du Maelström actives, ou Cooldown Manager en cours de chargement. Si les stacks sont illisibles en combat, un message le dira dans le chat.",
+        ["Check again"] = "Vérifier à nouveau",
+        ["The Cooldown Manager is disabled: the stacks cannot be read in combat. Press Check again to enable it."] = "Le Cooldown Manager est désactivé : les stacks sont illisibles en combat. Appuie sur « Vérifier à nouveau » pour l'activer.",
     }
 end
 -- Nom du "Cooldown Manager" tel que le client l'affiche dans ses menus
@@ -363,6 +372,8 @@ local function SetupCooldownManager(verbose)
         local status = RefreshCDMWarning(verbose)
         if status == "pending" and verbose then
             print(PREFIX .. T("the Cooldown Manager is not ready yet, checking again..."))
+        elseif status == "unknown" and verbose then
+            print(PREFIX .. T("cannot confirm without Maelstrom stacks active: on some UIs the icon only exists while the buff is up. Check again right after a fight, with stacks still active."))
         elseif status == "tracked" and verbose then
             print(PREFIX .. T("Maelstrom Weapon is tracked in the Cooldown Manager"))
         end
@@ -867,7 +878,7 @@ local function Update()
 end
 
 RefreshCDMWarning = function(force)
-    -- force (commande /mw setup) : repondre meme sans buff actif
+    -- force (commande /mw setup) : rapporter meme si l'avertissement est coupe
     -- inutile sur les clients sans auras secretes ; pas de verification en combat
     if not (C_Secrets and C_Secrets.ShouldAurasBeSecret) then return end
     if UnitAffectingCombat("player") then return end
@@ -883,13 +894,13 @@ RefreshCDMWarning = function(force)
     local missing = not HasMaelstromItem()
     if missing then
         local active = MaelstromBuffActive()
-        if active == nil or (not active and not force) then
+        if active == nil or not active then
             -- Buff absent ou illisible : l'icone du Cooldown Manager n'existe
             -- parfois qu'avec le buff actif (UI manette notamment). Sans certitude
             -- que le suivi manque vraiment, pas d'avertissement ; on reessaie.
             if cdmMissing then cdmMissing = false; Update() end
             ScheduleCDMCheck(10)
-            return "pending"
+            return "unknown"
         end
         if cdmGraceLeft > 0 then
             -- buff actif mais icones pas encore apparues : laisser le temps
@@ -1025,6 +1036,64 @@ local function BuildOptions()
     end
 
     Label(T("MaelstromBar  (command: /mw)"), "GameFontNormalLarge"); y = y - 32
+
+    -- Cooldown Manager : guider l'utilisateur. L'addon active le Cooldown
+    -- Manager lui-meme (bouton « Check again », comme au login), mais le suivi
+    -- du buff doit etre coche a la main dans les options du jeu : le panneau
+    -- affiche l'etat et la marche a suivre.
+    if C_Secrets and C_Secrets.ShouldAurasBeSecret then
+        Label(T("Cooldown Manager (stacks in combat)"), "GameFontNormal", 16, y); y = y - 22
+        local st = Label("", "GameFontHighlight", 16, y)
+        local fix = Label("", "GameFontHighlight", 16, y - 20)
+        fix:SetWidth(540)
+        local function RefreshCDMPanel()
+            local getCV = (C_CVar and C_CVar.GetCVar) or GetCVar
+            local okG, enabled = pcall(getCV, "cooldownViewerEnabled")
+            local s
+            if InCombatLockdown and InCombatLockdown() then
+                s = "combat"
+            elseif okG and enabled == "0" then
+                s = "disabled"
+            elseif not CooldownViewerExists() then
+                s = "pending"
+            elseif HasMaelstromItem() then
+                s = "tracked"
+            else
+                local active = MaelstromBuffActive()
+                s = (active == nil or not active) and "unknown" or "missing"
+            end
+            if s == "tracked" then
+                st:SetText(T("Maelstrom Weapon is tracked in the Cooldown Manager: the bar works in combat."))
+                st:SetTextColor(0.35, 1, 0.35)
+                fix:SetText("")
+            elseif s == "missing" then
+                st:SetText(T("Maelstrom Weapon is not tracked in the Cooldown Manager: the bar stays empty in combat."))
+                st:SetTextColor(1, 0.3, 0.25)
+                fix:SetText(T("Fix: open the game options, find the Cooldown Manager settings and add Maelstrom Weapon to the tracked buffs by hand (an addon cannot change that list). Then press Check again."))
+            elseif s == "disabled" then
+                st:SetText(T("The Cooldown Manager is disabled: the stacks cannot be read in combat. Press Check again to enable it."))
+                st:SetTextColor(1, 0.55, 0.2)
+                fix:SetText("")
+            elseif s == "combat" then
+                st:SetText(T("The Cooldown Manager cannot be checked in combat; reopen this panel out of combat."))
+                st:SetTextColor(1, 0.8, 0.2)
+                fix:SetText("")
+            else
+                st:SetText(T("Cannot confirm yet: no Maelstrom stacks active, or the Cooldown Manager is still loading. If the stacks cannot be read in combat, a message in chat will say so."))
+                st:SetTextColor(1, 0.8, 0.2)
+                fix:SetText("")
+            end
+        end
+        refreshers[#refreshers + 1] = RefreshCDMPanel
+        Button(T("Check again"), 130, 16, y - 70, function()
+            -- active le Cooldown Manager si besoin, verifie le suivi et
+            -- detaille la marche a suivre dans le chat (meme chemin que /mw setup)
+            SetupCooldownManager(true)
+            RefreshCDMPanel()
+            if C_Timer and C_Timer.After then C_Timer.After(1.5, RefreshCDMPanel) end
+        end)
+        y = y - 100
+    end
 
     Check(T("Unlock the bar to move it (/mw move)"),
         function() return unlocked end, function(v) SetUnlocked(v) end)
