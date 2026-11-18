@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 2 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 3 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -375,6 +375,7 @@ local function SetupCooldownManager(verbose)
         return
     end
     local function say(s) if verbose then print(PREFIX .. s) end end
+    say("code rev" .. REV) -- prouve que le code charge est bien le dernier
 
     -- 1) activer le Cooldown Manager
     local getCV = (C_CVar and C_CVar.GetCVar) or GetCVar
@@ -408,7 +409,7 @@ local function SetupCooldownManager(verbose)
     -- ensembles de categories selon l'argument. Permet de voir ce que ce
     -- client expose exactement pour determiner le suivi.
     if verbose then
-        pcall(function()
+        local okDump, errDump = pcall(function()
             local C = C_CooldownViewer
             local names = {}
             for k in pairs(C) do names[#names + 1] = tostring(k) end
@@ -440,6 +441,7 @@ local function SetupCooldownManager(verbose)
                 end
             end
         end)
+        if not okDump then say("catalog dump error: " .. tostring(errDump)) end
     end
 
     -- 4) verifier un peu plus tard ; la periode de grace laisse aux icones le temps
