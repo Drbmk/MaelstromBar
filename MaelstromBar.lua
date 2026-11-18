@@ -954,8 +954,17 @@ end
 
 ---------------------------------------------------------------- panneau d'options
 local function BuildOptions()
-    local panel = CreateFrame("Frame", "MaelstromBarOptionsPanel", UIParent)
-    panel.name = "MaelstromBar"
+    local root = CreateFrame("Frame", "MaelstromBarOptionsPanel", UIParent)
+    root.name = "MaelstromBar"
+    -- Le contenu du panneau depasse la hauteur affichable : il est construit
+    -- dans une frame deroulante (ascenseur a droite, molette).
+    local scroll = CreateFrame("ScrollFrame", nil, root, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 4, -4)
+    scroll:SetPoint("BOTTOMRIGHT", -4, 4)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(560, 800) -- largeur ajustee a l'affichage, hauteur en fin de construction
+    scroll:SetScrollChild(content)
+    local panel = content -- tout ce qui suit est construit dans la zone deroulante
     local refreshers = {}
     local y = -16
 
@@ -1199,19 +1208,25 @@ local function BuildOptions()
         SetScale(1)
     end)
 
-    panel:SetScript("OnShow", function()
+    -- hauteur du contenu = hauteur reellement utilisee par les widgets
+    content:SetHeight(-y + 16)
+
+    root:SetScript("OnShow", function()
+        -- largeur = zone visible moins l'ascenseur
+        content:SetWidth(math.max((scroll:GetWidth() or 590) - 30, 500))
         for _, f in ipairs(refreshers) do f() end
     end)
 
     if Settings and Settings.RegisterCanvasLayoutCategory then
-        local category = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
+        local category = Settings.RegisterCanvasLayoutCategory(root, root.name)
         Settings.RegisterAddOnCategory(category)
         openOptions = function() Settings.OpenToCategory(category:GetID()) end
     elseif InterfaceOptions_AddCategory then
-        InterfaceOptions_AddCategory(panel)
+        root:SetSize(580, 500)
+        InterfaceOptions_AddCategory(root)
         openOptions = function()
-            InterfaceOptionsFrame_OpenToCategory(panel)
-            InterfaceOptionsFrame_OpenToCategory(panel)
+            InterfaceOptionsFrame_OpenToCategory(root)
+            InterfaceOptionsFrame_OpenToCategory(root)
         end
     end
 end
