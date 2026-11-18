@@ -4,6 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
+local REV = 2 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -401,6 +402,45 @@ local function SetupCooldownManager(verbose)
     -- faire si le buff n'y est pas.
     local id = FindMaelstromCooldownID()
     say("cooldownID=" .. tostring(id))
+
+    -- 3 bis) dump de l'API (verbose uniquement) : liste des fonctions de
+    -- C_CooldownViewer, champs du descriptif du cooldown, comptage des
+    -- ensembles de categories selon l'argument. Permet de voir ce que ce
+    -- client expose exactement pour determiner le suivi.
+    if verbose then
+        pcall(function()
+            local C = C_CooldownViewer
+            local names = {}
+            for k in pairs(C) do names[#names + 1] = tostring(k) end
+            table.sort(names)
+            say("C_CooldownViewer: " .. table.concat(names, ", "))
+            if id then
+                local okI, info = pcall(C.GetCooldownViewerCooldownInfo, id)
+                if okI and type(info) == "table" then
+                    local fields = {}
+                    for k, v in pairs(info) do
+                        local tv = type(v)
+                        if tv == "string" or tv == "number" or tv == "boolean" then
+                            local pv = Plain(v)
+                            fields[#fields + 1] = tostring(k) .. "=" .. (pv ~= nil and tostring(pv) or "?")
+                        elseif v ~= nil then
+                            fields[#fields + 1] = tostring(k) .. "=(" .. tv .. ")"
+                        end
+                    end
+                    table.sort(fields)
+                    say("cooldown info: " .. table.concat(fields, ", "))
+                end
+                local function cnt(ok, t) return (ok and type(t) == "table") and tostring(#t) or "?" end
+                for name, cat in pairs(Enum and Enum.CooldownViewerCategory or {}) do
+                    local okA, all = pcall(C.GetCooldownViewerCategorySet, cat, true)
+                    local okT, tracked = pcall(C.GetCooldownViewerCategorySet, cat, false)
+                    local okN, def = pcall(C.GetCooldownViewerCategorySet, cat)
+                    say(string.format("category %s: all=%s tracked=%s default=%s",
+                        tostring(name), cnt(okA, all), cnt(okT, tracked), cnt(okN, def)))
+                end
+            end
+        end)
+    end
 
     -- 4) verifier un peu plus tard ; la periode de grace laisse aux icones le temps
     -- d'apparaitre (UI manette) avant d'afficher l'avertissement
@@ -1518,7 +1558,7 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         print(PREFIX .. T("aura name = ") .. arg)
         Update()
     else
-        print(PREFIX .. "v" .. (AddonVersion() or "?")
+        print(PREFIX .. "v" .. (AddonVersion() or "?") .. " rev" .. REV
             .. " : /mw options | move | lock | always | warn | color | glow | glowspell | glowframe | glowscan | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <buff name> | setup | log | testerror | debug")
     end
 end
