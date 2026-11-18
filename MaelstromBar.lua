@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 4 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 5 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -78,7 +78,9 @@ if GetLocale() == "frFR" then
         ["Cooldown Manager (stacks in combat)"] = "Cooldown Manager (stacks en combat)",
         ["Maelstrom Weapon is tracked in the Cooldown Manager: the bar works in combat."] = "Arme du Maelström est suivie dans le Cooldown Manager : la barre fonctionne en combat.",
         ["Maelstrom Weapon is not tracked in the Cooldown Manager: the bar stays empty in combat."] = "Arme du Maelström n'est pas suivie dans le Cooldown Manager : la barre reste vide en combat.",
-        ["Fix: open the game options, find the Cooldown Manager settings and add Maelstrom Weapon to the tracked buffs by hand (an addon cannot change that list). Then press Check again."] = "Correction : ouvre les options du jeu, trouve les réglages du Cooldown Manager et ajoute Arme du Maelström aux buffs suivis à la main (un addon ne peut pas modifier cette liste). Appuie ensuite sur « Vérifier à nouveau ».",
+        ["Fix: press Open the Cooldown Manager settings below, then add Maelstrom Weapon to the tracked buffs by hand (an addon cannot change that list). Press Check again afterwards."] = "Correction : appuie sur « Ouvrir les réglages du Cooldown Manager » ci-dessous, puis ajoute Arme du Maelström aux buffs suivis à la main (un addon ne peut pas modifier cette liste). Appuie ensuite sur « Vérifier à nouveau ».",
+        ["Open the Cooldown Manager settings"] = "Ouvrir les réglages du Cooldown Manager",
+        ["Cooldown Manager settings not found: open the game options and look for them"] = "réglages du Cooldown Manager introuvables : ouvre les options du jeu et cherche-les",
         ["The Cooldown Manager cannot be checked in combat; reopen this panel out of combat."] = "Le Cooldown Manager ne peut pas être vérifié en combat ; rouvre ce panneau hors combat.",
         ["Cannot confirm yet: no Maelstrom stacks active, or the Cooldown Manager is still loading. If the stacks cannot be read in combat, a message in chat will say so."] = "Impossible de confirmer pour l'instant : pas de stacks Arme du Maelström actives, ou Cooldown Manager en cours de chargement. Si les stacks sont illisibles en combat, un message le dira dans le chat.",
         ["Check again"] = "Vérifier à nouveau",
@@ -364,6 +366,19 @@ local function CatalogTrackedState()
     return foundTracked
 end
 
+-- L'absence de l'icone du Cooldown Manager prouve-t-elle le non-suivi ? Oui sur
+-- l'UI clavier (l'icone y existe meme sans buff actif, des que le buff est
+-- suivi) ; non sur l'UI manette (elle n'y apparait qu'avec le buff actif).
+-- On ne conclut donc que si l'UI manette est exclue : aucune manette active.
+local function IconAbsenceIsProof()
+    if C_GamePad and C_GamePad.IsEnabled then
+        local ok, enabled = pcall(C_GamePad.IsEnabled)
+        if ok and enabled == false then return true end
+        if ok and enabled == true then return false end
+    end
+    return false -- manette active ou etat inconnu : prudence
+end
+
 -- verbose : detaille chaque etape (commande /mw setup) ; sinon un seul message si echec
 local function SetupCooldownManager(verbose)
     if not (C_Secrets and C_Secrets.ShouldAurasBeSecret) then
@@ -448,6 +463,21 @@ local function SetupCooldownManager(verbose)
                         cnt(okN, def), has(okN, def)))
                 end
                 say("info.category=" .. tostring(Plain(info and info.category)))
+                -- etat manette : determine si l'absence d'icone est une preuve
+                do
+                    local bits = {}
+                    if C_GamePad and C_GamePad.IsEnabled then
+                        local okE, en = pcall(C_GamePad.IsEnabled)
+                        bits[#bits + 1] = "IsEnabled=" .. ((okE and tostring(en)) or "?")
+                        if C_GamePad.IsUsingGamepadUI then
+                            local okU, ui = pcall(C_GamePad.IsUsingGamepadUI)
+                            bits[#bits + 1] = "IsUsingGamepadUI=" .. ((okU and tostring(ui)) or "?")
+                        end
+                    else
+                        bits[#bits + 1] = "C_GamePad absent"
+                    end
+                    say("gamepad: " .. table.concat(bits, ", "))
+                end
             end
         end)
         if not okDump then say("catalog dump error: " .. tostring(errDump)) end
@@ -985,14 +1015,14 @@ RefreshCDMWarning = function(force)
         if active == nil or not active then
             -- Buff absent ou illisible : l'icone du Cooldown Manager n'existe
             -- parfois qu'avec le buff actif (UI manette notamment). Le catalogue
-            -- peut quand meme dire si le buff est suivi : sans lui, pas de
-            -- certitude, donc pas d'avertissement.
-            if CatalogTrackedState() ~= false then
+            -- ou l'exclusion de l'UI manette peut quand meme trancher ; sans
+            -- certitude, pas d'avertissement.
+            if CatalogTrackedState() ~= false and not IconAbsenceIsProof() then
                 if cdmMissing then cdmMissing = false; Update() end
                 ScheduleCDMCheck(10)
                 return "unknown"
             end
-            -- non suivi d'apres le catalogue : avertissement legitime (suite ci-dessous)
+            -- preuve de non-suivi : avertissement legitime (suite ci-dessous)
         end
         if cdmGraceLeft > 0 then
             -- buff actif mais icones pas encore apparues : laisser le temps
@@ -1042,6 +1072,44 @@ local function SetUnlocked(state)
     unlocked = state and true or false
     if unlocked then overlay:Show() else overlay:Hide() end
     Update()
+end
+
+-- Ouvre la page des reglages du Cooldown Manager dans les options du jeu
+-- (recherche de la categorie par nom, avec sous-categories). Repli : message
+-- si la page n'est pas trouvee.
+local function OpenCDMSettings()
+    local function fail()
+        print(PREFIX .. T("Cooldown Manager settings not found: open the game options and look for them"))
+    end
+    if not (Settings and Settings.GetCategories and Settings.OpenToCategory) then return fail() end
+    local target = CDM_NAME:lower()
+    local function Match(name)
+        if type(name) ~= "string" or #name < 3 then return false end
+        local n = name:lower()
+        return n:find("cooldown", 1, true) or target:find(n, 1, true) or n:find(target, 1, true)
+    end
+    local function Open(cat)
+        local ok = pcall(Settings.OpenToCategory, cat.GetID and cat:GetID() or cat)
+        if not ok then pcall(Settings.OpenToCategory, cat) end
+    end
+    local okS, cats = pcall(Settings.GetCategories)
+    if not okS or type(cats) ~= "table" then return fail() end
+    for _, cat in ipairs(cats) do
+        if type(cat) == "number" and Settings.GetCategory then
+            local okC, real = pcall(Settings.GetCategory, cat)
+            if okC and type(real) == "table" then cat = real end
+        end
+        if type(cat) == "table" then
+            if Match(cat.GetName and cat:GetName()) then Open(cat) return end
+            local okS2, subs = pcall(cat.GetSubcategories, cat)
+            if okS2 and type(subs) == "table" then
+                for _, sub in ipairs(subs) do
+                    if Match(sub.GetName and sub:GetName()) then Open(sub) return end
+                end
+            end
+        end
+    end
+    fail()
 end
 
 ---------------------------------------------------------------- panneau d'options
@@ -1162,10 +1230,11 @@ local function BuildOptions()
             else
                 local active = MaelstromBuffActive()
                 if active == nil or not active then
-                    -- sans stacks actives, l'icone peut ne pas exister : le
-                    -- catalogue du Cooldown Manager tranche quand il peut
+                    -- sans stacks actives, l'icone peut ne pas exister (UI
+                    -- manette) : le catalogue ou l'exclusion de l'UI manette
+                    -- tranche quand c'est possible
                     local cat = CatalogTrackedState()
-                    if cat == false then s = "missing"
+                    if cat == false or IconAbsenceIsProof() then s = "missing"
                     elseif cat == true then s = "tracked"
                     else s = "unknown" end
                 else
@@ -1179,7 +1248,7 @@ local function BuildOptions()
             elseif s == "missing" then
                 st:SetText(T("Maelstrom Weapon is not tracked in the Cooldown Manager: the bar stays empty in combat."))
                 st:SetTextColor(1, 0.3, 0.25)
-                fix:SetText(T("Fix: open the game options, find the Cooldown Manager settings and add Maelstrom Weapon to the tracked buffs by hand (an addon cannot change that list). Then press Check again."))
+                fix:SetText(T("Fix: press Open the Cooldown Manager settings below, then add Maelstrom Weapon to the tracked buffs by hand (an addon cannot change that list). Press Check again afterwards."))
             elseif s == "disabled" then
                 st:SetText(T("The Cooldown Manager is disabled: the stacks cannot be read in combat. Press Check again to enable it."))
                 st:SetTextColor(1, 0.55, 0.2)
@@ -1202,6 +1271,7 @@ local function BuildOptions()
             RefreshCDMPanel()
             if C_Timer and C_Timer.After then C_Timer.After(1.5, RefreshCDMPanel) end
         end)
+        Button(T("Open the Cooldown Manager settings"), 300, 156, y - 70, OpenCDMSettings)
         y = y - 100
     end
 
