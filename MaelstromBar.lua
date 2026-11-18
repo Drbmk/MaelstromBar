@@ -71,6 +71,8 @@ if GetLocale() == "frFR" then
         ["/mw size <width> <height> [spacing]  (10-80, 6-60, 0-30)"] = "/mw size <largeur> <hauteur> [espacement]  (10-80, 6-60, 0-30)",
         ["Reset position and size (/mw reset)"] = "Réinitialiser la position et la taille (/mw reset)",
         ["the Cooldown Manager is not ready yet, checking again..."] = "le Gestionnaire de temps de recharge n'est pas encore prêt, nouvelle vérification en cours…",
+        ["in combat: Maelstrom Weapon is not in the Cooldown Manager, the stacks cannot be read. After combat, type /mw setup."] = "en combat : Arme du Maelström n'est pas dans le Gestionnaire de temps de recharge, les stacks sont illisibles. Hors combat, tape /mw setup.",
+        ["in combat: the Maelstrom Weapon icon of the Cooldown Manager was found but its stacks could not be read; please report this with /mw log."] = "en combat : l'icône Arme du Maelström du Gestionnaire de temps de recharge est trouvée mais ses stacks sont illisibles ; signale-le avec /mw log.",
     }
 end
 -- Nom du "Cooldown Manager" tel que le client l'affiche dans ses menus
@@ -171,6 +173,14 @@ end
 local cdmItem      -- icone du Cooldown Manager trouvee (cachee : evite de rebalayer a chaque lecture)
 local cdmCooldown  -- lectures restantes avant un nouveau balayage complet apres un echec
 
+-- Diagnostique en combat : si la lecture des stacks via le Cooldown Manager
+-- echoue, un message explique pourquoi (une fois par combat) plutot qu'une
+-- barre muette a 0, qui donne des rapports "ne suit pas en combat" sans cause.
+local cdmItemLastSeen   -- horodatage de la derniere icone vue (le suivi fonctionne)
+local cdmValueEverRead  -- vrai : au moins une valeur de stacks lue depuis le login
+local viaCDM            -- vrai : la lecture courante des stacks passe par le Cooldown Manager
+local combatHintDone    -- message de combat deja affiche pour ce combat
+
 local function ReadAuraFromFrame(f)
     -- Lecture seule : on n'appelle pas GetAuraData. Cette methode peut rafraichir
     -- le cache de l'icone depuis notre contexte "tainted" ; Blizzard relit alors
@@ -192,10 +202,14 @@ local function ReadAuraFromFrame(f)
 end
 
 local function ReadFromCooldownManager()
+    local now = time()
     -- icone cachee d'abord : lecture directe, rapide, des que le buff est suivi
     if cdmItem then
         local v = ReadAuraFromFrame(cdmItem)
-        if v ~= nil then return v end
+        if v ~= nil then
+            cdmItemLastSeen, cdmValueEverRead = now, true
+            return v
+        end
         cdmItem = nil -- buff tombe ou icone retiree : il faut rechercher l'icone
     elseif cdmCooldown and cdmCooldown > 0 then
         cdmCooldown = cdmCooldown - 1
@@ -212,8 +226,10 @@ local function ReadFromCooldownManager()
             items = items or { v:GetChildren() }
             for _, f in ipairs(items) do
                 if IsMaelstromItem(f) then
+                    cdmItemLastSeen = now -- icone presente : le suivi fonctionne
                     local val = ReadAuraFromFrame(f)
                     if val ~= nil then
+                        cdmValueEverRead = true
                         cdmItem, cdmCooldown = f, nil
                         return val
                     end
@@ -354,6 +370,7 @@ local function SetupCooldownManager(verbose)
 end
 
 local function ReadStacks()
+    viaCDM = false
     -- Lecture directe par ID (la plus fiable). "applications" peut etre une valeur
     -- secrete (liste blanche Blizzard) : on la renvoie telle quelle, la StatusBar l'accepte.
     if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
@@ -368,6 +385,7 @@ local function ReadStacks()
         end
     end
     if AurasSecret() then
+        viaCDM = true -- en combat, la lecture depend du Cooldown Manager
         local v = ReadFromCooldownManager()
         if v ~= nil then return v end
         return 0
@@ -812,6 +830,20 @@ local function Update()
     local inCombat = UnitAffectingCombat("player")
     local secret = issecretvalue and issecretvalue(stacks)
 
+    -- Diagnostique en combat : si la lecture des stacks depend du Cooldown
+    -- Manager et echoue, expliquer pourquoi (une fois par combat, 10 s de
+    -- marge) plutot qu'une barre muette a 0. Respecte /mw warn.
+    if inCombat and viaCDM and db.warnCDM and not combatHintDone then
+        local now = time()
+        if now - (cdmItemLastSeen or 0) > 10 then
+            combatHintDone = true
+            print(PREFIX .. T("in combat: Maelstrom Weapon is not in the Cooldown Manager, the stacks cannot be read. After combat, type /mw setup."))
+        elseif not cdmValueEverRead and cdmItemLastSeen and now - cdmItemLastSeen <= 2 then
+            combatHintDone = true
+            print(PREFIX .. T("in combat: the Maelstrom Weapon icon of the Cooldown Manager was found but its stacks could not be read; please report this with /mw log."))
+        end
+    end
+
     -- Valeur secrete : aucune comparaison possible (barre toujours visible)
     RefreshGlow(stacks)
 
@@ -1178,6 +1210,12 @@ ev:SetScript("OnEvent", function(self, event, unit)
     elseif event == "UNIT_AURA" then
         if unit == "player" then Update() end
     else
+        if event == "PLAYER_REGEN_DISABLED" then
+            -- entree en combat : reinitialiser le diagnostique (10 s de marge
+            -- avant le message, le temps que les premieres stacks arrivent)
+            combatHintDone = false
+            cdmItemLastSeen = time()
+        end
         if event == "PLAYER_REGEN_ENABLED" and setupDone then RefreshCDMWarning() end
         glowDirty = true -- barres d'action modifiees : relire les boutons
         Update()

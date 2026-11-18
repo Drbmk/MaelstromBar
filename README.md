@@ -70,7 +70,7 @@ The bar can be resized in two ways, which combine:
 ## Troubleshooting
 
 - **A Lua error flashed by and you missed it:** type `/mw log` — errors from the whole client (including Blizzard's) are recorded and can be read back, with the time, the repeat count and the call stack.
-- **The bar stays empty in combat:** make sure Maelstrom Weapon is in the Cooldown Manager's tracked buffs (a red warning under the bar tells you when it is not — it only shows with the buff active, and can be turned off with `/mw warn`), then type `/mw setup`.
+- **The bar stays empty in combat:** make sure Maelstrom Weapon is in the Cooldown Manager's tracked buffs (a red warning under the bar tells you when it is not — it only shows with the buff active, and can be turned off with `/mw warn`), then type `/mw setup`. If the stacks cannot be read during combat, a chat message tells you which of the two causes it is (not tracked, or icon unreadable — in that case report it with `/mw log`).
 - **The bar stays empty out of combat too:** with stacks active, type `/mw debug` and check that the buff shows up. If it has another name, use `/mw aura "exact name"`.
 - **No glow:** make sure the spell is on an action bar, then try `/mw test 5`. A button bound to a macro works too (`#showtooltip` macros, `/cast`, `/use`, `/castsequence`). Buttons outside the known bars (Controller UI, other addons) are found by a global scan; type `/mw glowscan` to see what is detected. For anything still missed, use `/mw glowframe FrameName` (find the name with `/fstack`).
 - **The addon does not show up:** wrong folder, or "Load out of date AddOns" is not ticked.

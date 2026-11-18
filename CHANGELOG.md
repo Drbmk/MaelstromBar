@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.1
+
+- New: in-combat diagnosis. When the bar has to read the stacks through the Cooldown Manager (in combat, on clients that hide player auras) and cannot, a chat message now explains the cause once per combat instead of the bar staying silently at 0: either Maelstrom Weapon is not in the Cooldown Manager's tracked buffs (fix it in the game's options, then `/mw setup` out of combat), or the icon is there but its stack count is unreadable (a rarer case — please report it with `/mw log`). The message respects the `/mw warn` toggle and only appears after 10 seconds of combat, so it does not fire while the first stacks are still building.
+
 ## 1.4.0
 
 - Fixed: the red "Maelstrom Weapon is not tracked in the Cooldown Manager" warning could still appear while idling in town after login (seen with the Controller UI). The Cooldown Manager's icon apparently only exists while the buff is active on that UI, so an icon missing with no buff active is not proof that tracking is broken. The warning is now shown only when it is certain: the buff must be active (readable out of combat) while the icon is missing. When the buff is not active, the check stays silent and keeps retrying.
