@@ -326,6 +326,43 @@ local function FindMaelstromCooldownID()
     return nil
 end
 
+-- Le catalogue du Cooldown Manager permet parfois de savoir si le buff est
+-- suivi sans attendre son icone (qui, sur certaines UI, n'existe qu'avec le
+-- buff actif) : on compare l'ensemble de categorie rendu avec l'argument
+-- "tout inclure" et sans lui. Renvoie true (suivi), false (non suivi) ou nil
+-- (inconnu) ; on ne conclut que si les deux ensembles se differencient
+-- clairement, pour ne jamais prevenir a tort.
+local function CatalogTrackedState()
+    local C = C_CooldownViewer
+    if not (C and C.GetCooldownViewerCategorySet and C.GetCooldownViewerCooldownInfo) then return nil end
+    local id = FindMaelstromCooldownID()
+    if not id then return nil end
+    -- champ explicite du descriptif du cooldown, s'il existe
+    local okI, info = pcall(C.GetCooldownViewerCooldownInfo, id)
+    if okI and type(info) == "table" then
+        for _, k in ipairs({ "tracked", "isTracked" }) do
+            local v = Plain(info[k])
+            if v == true then return true end
+            if v == false then return false end
+        end
+    end
+    local foundTracked, totalTracked, totalAll = false, 0, 0
+    for _, cat in pairs(Enum and Enum.CooldownViewerCategory or {}) do
+        local okA, all = pcall(C.GetCooldownViewerCategorySet, cat, true)
+        local okT, tracked = pcall(C.GetCooldownViewerCategorySet, cat, false)
+        if okA and type(all) == "table" and okT and type(tracked) == "table" then
+            for _ in ipairs(all) do totalAll = totalAll + 1 end
+            for _, cid in ipairs(tracked) do
+                totalTracked = totalTracked + 1
+                if cid == id then foundTracked = true end
+            end
+        end
+    end
+    -- ensembles vides, egaux ou suspects : on ne peut pas conclure
+    if totalAll == 0 or totalTracked == 0 or totalTracked >= totalAll then return nil end
+    return foundTracked
+end
+
 -- verbose : detaille chaque etape (commande /mw setup) ; sinon un seul message si echec
 local function SetupCooldownManager(verbose)
     if not (C_Secrets and C_Secrets.ShouldAurasBeSecret) then
@@ -896,11 +933,15 @@ RefreshCDMWarning = function(force)
         local active = MaelstromBuffActive()
         if active == nil or not active then
             -- Buff absent ou illisible : l'icone du Cooldown Manager n'existe
-            -- parfois qu'avec le buff actif (UI manette notamment). Sans certitude
-            -- que le suivi manque vraiment, pas d'avertissement ; on reessaie.
-            if cdmMissing then cdmMissing = false; Update() end
-            ScheduleCDMCheck(10)
-            return "unknown"
+            -- parfois qu'avec le buff actif (UI manette notamment). Le catalogue
+            -- peut quand meme dire si le buff est suivi : sans lui, pas de
+            -- certitude, donc pas d'avertissement.
+            if CatalogTrackedState() ~= false then
+                if cdmMissing then cdmMissing = false; Update() end
+                ScheduleCDMCheck(10)
+                return "unknown"
+            end
+            -- non suivi d'apres le catalogue : avertissement legitime (suite ci-dessous)
         end
         if cdmGraceLeft > 0 then
             -- buff actif mais icones pas encore apparues : laisser le temps
@@ -1069,7 +1110,16 @@ local function BuildOptions()
                 s = "tracked"
             else
                 local active = MaelstromBuffActive()
-                s = (active == nil or not active) and "unknown" or "missing"
+                if active == nil or not active then
+                    -- sans stacks actives, l'icone peut ne pas exister : le
+                    -- catalogue du Cooldown Manager tranche quand il peut
+                    local cat = CatalogTrackedState()
+                    if cat == false then s = "missing"
+                    elseif cat == true then s = "tracked"
+                    else s = "unknown" end
+                else
+                    s = "missing"
+                end
             end
             if s == "tracked" then
                 st:SetText(T("Maelstrom Weapon is tracked in the Cooldown Manager: the bar works in combat."))
