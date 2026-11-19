@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 15 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 16 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -1317,6 +1317,12 @@ local function OpenCDMSettings()
             end
         end
     end
+    if InCombatLockdown() then
+        -- ouvrir/clicker les reglages du jeu depuis l'addon en combat declenche
+        -- le popup "action reservee a l'UI Blizzard" : refuser proprement
+        print(PREFIX .. T("cannot click that in combat, retry out of combat"))
+        return
+    end
     if not (Settings and Settings.OpenToCategory) then
         print(PREFIX .. "Settings API incomplete : OpenToCategory="
             .. tostring(Settings and Settings.OpenToCategory or nil))
@@ -1755,14 +1761,15 @@ ev:SetScript("OnEvent", function(self, event, unit, ...)
         playerGUID = (UnitGUID and UnitGUID("player")) or playerGUID
         cleuEvents = cleuEvents or {}
         -- journal de combat : repli de lecture en combat (voir OnCombatLog).
-        -- Plusieurs noms possibles selon les clients : tous ceux qui
-        -- s'enregistrent sont ecoutes, le statut est visible via /mw cleu.
-        -- (Certains clients n'ont pas CombatLogGetCurrentEventInfo et passent
-        -- la charge utile en arguments de l'evenement.)
-        for _, ev in ipairs({ "COMBAT_LOG_EVENT_UNFILTERED", "COMBAT_LOG_EVENT" }) do
+        -- COMBAT_LOG_EVENT_UNFILTERED est le nom standard cote addons ;
+        -- COMBAT_LOG_EVENT (ancien nom) n'est tente que via /mw cleu pour ne
+        -- pas declencher de popup "action reservee a l'UI Blizzard" au login
+        -- si le client le protege. Statut visible via /mw cleu.
+        for _, ev in ipairs({ "COMBAT_LOG_EVENT_UNFILTERED" }) do
             local ok, err = pcall(self.RegisterEvent, self, ev)
             cleuEvents[ev] = ok and "enregistre" or tostring(err)
         end
+        cleuEvents["COMBAT_LOG_EVENT"] = "non tente (voire /mw cleu)"
 
         -- Integration au menu d'edition de l'interface (clients qui l'ont)
         if EditModeManagerFrame and EditModeManagerFrame.HookScript then
@@ -1819,8 +1826,14 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         SetupCooldownManager(true)
     elseif cmd == "cleu" then
         -- /mw cleu : tracer 20 s le journal de combat (diagnostic du repli).
-        -- Montre les evenements d'aura du joueur : si la trace reste vide, le
-        -- journal n'est pas emis ; si amount est secret, le repli est mort.
+        -- /mw cleu all : tenter aussi l'ancien nom COMBAT_LOG_EVENT (s'il est
+        -- protege, le popup Blizzard apparait maintenant et on saura que
+        -- c'est lui le responsable).
+        if arg == "all" or arg == "tout" then
+            local ok, err = pcall(ev.RegisterEvent, ev, "COMBAT_LOG_EVENT")
+            cleuEvents = cleuEvents or {}
+            cleuEvents["COMBAT_LOG_EVENT"] = ok and "enregistre" or tostring(err)
+        end
         if type(cleuEvents) == "table" then
             for ev, st in pairs(cleuEvents) do print(PREFIX .. ev .. " : " .. tostring(st)) end
         else
