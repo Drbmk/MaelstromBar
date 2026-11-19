@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 17 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 18 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -1863,6 +1863,38 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
                             shown = tv .. ": " .. tostring(v)
                         end
                         print(PREFIX .. "  " .. k .. " = " .. shown)
+                    end
+                    -- sonde : le descriptif donne buffSlot ; tester si la lecture
+                    -- de l'aura par ce slot precis passe en combat (le balayage
+                    -- par index est refuse, mais un slot exact peut passer)
+                    local slot = Plain(info.buffSlot)
+                    if type(slot) == "number" and slot > 0 and C_UnitAuras then
+                        local probes = {}
+                        if C_UnitAuras.GetAuraDataBySlot then
+                            probes[#probes + 1] = { "GetAuraDataBySlot", function()
+                                return C_UnitAuras.GetAuraDataBySlot("player", slot)
+                            end }
+                        end
+                        if C_UnitAuras.GetAuraDataByIndex then
+                            probes[#probes + 1] = { "GetAuraDataByIndex", function()
+                                return C_UnitAuras.GetAuraDataByIndex("player", slot, "HELPFUL")
+                            end }
+                        end
+                        for _, p in ipairs(probes) do
+                            local ok, aura = pcall(p[2])
+                            if not ok then
+                                print(PREFIX .. "  " .. p[1] .. "(player, " .. slot .. ") : erreur " .. tostring(aura))
+                            elseif type(aura) ~= "table" then
+                                print(PREFIX .. "  " .. p[1] .. "(player, " .. slot .. ") : " .. tostring(aura))
+                            else
+                                local apps = aura.applications
+                                local appsTxt
+                                if issecretvalue and issecretvalue(apps) then appsTxt = "<secret>" else appsTxt = tostring(apps) end
+                                print(PREFIX .. "  " .. p[1] .. "(player, " .. slot .. ") : applications="
+                                    .. appsTxt .. " | name=" .. tostring(aura.name)
+                                    .. " | spellId=" .. tostring(aura.spellId))
+                            end
+                        end
                     end
                 end
             end
