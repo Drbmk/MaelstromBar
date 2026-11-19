@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 19 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 20 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -722,6 +722,107 @@ local function ApplyBgColor()
     for i = 1, MAX_STACKS do SetColor(squares[i].bg, c[1], c[2], c[3], 0.8) end
 end
 
+---------------------------------------------------------------- couche native (combat)
+-- Le client Forever reserve la lecture des auras au code Blizzard en combat
+-- ("valeurs secretes") : aucun addon ne peut y lire le nombre de stacks, ni
+-- par l'API des auras, ni par le journal de combat (reserve lui aussi). En
+-- revanche, le moteur natif peut piloter des elements d'affichage : on cree
+-- un conteneur d'auras (meme mecanisme que l'UI du jeu) dont le slot
+-- Maelstrom remplit lui-meme des barres et ecrit le compteur, secret ou pas.
+-- Les widgets pilotes doivent naitre dans initializeFrame et deviennent
+-- ensuite "interdits" : on les ancre sur nos carres pendant l'init, leur
+-- geometrie suit donc /mw size automatiquement. Changer les couleurs ou le
+-- compteur impose de reconstruire la couche (hors combat) ; sans cette API
+-- (autres clients), le repli Cooldown Manager d'origine reste en place.
+local nativeHost        -- frame hote : son alpha pilote la visibilite de la couche
+local nativeLayer       -- couche construite : { host, fills, count }
+local nativeUnavailable -- ce client n'expose pas l'API : repli Cooldown Manager
+local nativeDirty       -- reconstruction demandee (attend la fin du combat)
+
+-- Formateur du compteur natif : nombre entier (mecanique du jeu).
+local function MakeCountFormatter()
+    if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter
+        and Enum and Enum.NumericRuleFormatRounding) then return nil end
+    local ok, formatter = pcall(C_StringUtil.CreateNumericRuleFormatter)
+    if not ok or not formatter then return nil end
+    local down = Enum.NumericRuleFormatRounding.Down
+    pcall(formatter.SetBreakpoints, formatter, {
+        {
+            threshold = 0, min = 0, step = 1, rounding = down, format = "%d",
+            components = { { div = 1, step = 1, rounding = down } },
+        },
+    })
+    return formatter
+end
+
+local function BuildNativeLayer()
+    if nativeLayer or nativeUnavailable or not db then return end
+    if InCombatLockdown() then return end -- creation hors combat uniquement
+    local ok = pcall(function()
+        local host = CreateFrame("Frame", nil, bar)
+        host:SetAllPoints(bar)
+        host:SetFrameLevel(bar:GetFrameLevel() + 5)
+        host:SetAlpha(0) -- visible seulement en combat (gere par Update)
+        local container = CreateFrame("AuraContainer", nil, host, "CustomAuraContainerTemplate")
+        container:SetUnit("player")
+        local fills, nativeCount = {}, nil
+        local slot = container:AddAuraSlot("maelstrom", "HELPFUL", {
+            candidateFilters = { includeSpellIDs = {
+                [408505] = true, [408498] = true, [53817] = true, [344179] = true,
+            } },
+            initializeFrame = function(frame)
+                frame:ClearAllPoints()
+                frame:SetAllPoints(host)
+                frame:SetFrameLevel(host:GetFrameLevel() + 1)
+                frame:SetMouseClickEnabled(false)
+                frame:EnableMouseMotion(false)
+                local cn = db.colorNormal or DEFAULTS.colorNormal
+                local cf = db.colorFull or DEFAULTS.colorFull
+                for i = 1, MAX_STACKS do
+                    local function NativeBar(lo, hi, level, c)
+                        local s = CreateFrame("StatusBar", nil, frame)
+                        -- ancre vivante sur le carre : suit /mw size tout seul
+                        s:SetPoint("TOPLEFT", squares[i], "TOPLEFT", 2, -2)
+                        s:SetPoint("BOTTOMRIGHT", squares[i], "BOTTOMRIGHT", -2, 2)
+                        s:SetFrameLevel(squares[i]:GetFrameLevel() + level)
+                        s:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+                        s:SetStatusBarColor(c[1], c[2], c[3], 1)
+                        -- le moteur ecrit lui-meme la valeur ; min..max = i-1..i,
+                        -- comme nos propres barres : plein des que stacks >= i
+                        frame:SetApplicationBar(s, { minApplications = lo, maxApplications = hi })
+                        return s
+                    end
+                    fills[i] = NativeBar(i - 1, i, 1, cn)
+                    NativeBar(MAX_STACKS - 1, MAX_STACKS, 2, cf)
+                end
+                if db.showCount then
+                    nativeCount = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+                    nativeCount:SetPoint("CENTER", host, "CENTER", 0, 0)
+                    nativeCount:SetTextColor(1, 1, 1)
+                    frame:SetApplicationCount(nativeCount, { formatter = MakeCountFormatter() })
+                end
+            end,
+        })
+        if not slot then error("native maelstrom slot unavailable") end
+        nativeHost, nativeLayer = host, { host = host, fills = fills, count = nativeCount }
+    end)
+    if not ok then
+        if nativeHost then nativeHost:Hide() end
+        nativeHost, nativeLayer = nil, nil
+        nativeUnavailable = true
+    end
+end
+
+-- A appeler quand les couleurs ou le compteur changent : reconstruit la
+-- couche native hors combat, sinon juste apres la fin du combat.
+local function NativeChanged()
+    if nativeUnavailable then return end
+    if InCombatLockdown() then nativeDirty = true; return end
+    if nativeHost then nativeHost:Hide() end -- l'ancienne couche est abandonnee
+    nativeHost, nativeLayer = nil, nil
+    BuildNativeLayer()
+end
+
 ---------------------------------------------------------------- halo sur la barre d'action
 local glowDirty = true
 local glowTargets = {}   -- noms (minuscules) et IDs a surligner
@@ -1001,10 +1102,17 @@ local function Update()
     local inCombat = UnitAffectingCombat("player")
     local secret = issecretvalue and issecretvalue(stacks)
 
+    -- Couche native (clients Forever) : en combat, le moteur du client pilote
+    -- lui-meme les barres et le compteur du slot d'aura, secret ou pas ; nos
+    -- propres remplissages se cachent pour lui laisser la place. Hors combat,
+    -- en mode test ou en mode edition, le fonctionnement habituel reprend.
+    local nativeActive = nativeLayer and inCombat and not testStacks and not unlocked
+
     -- Diagnostique en combat : si la lecture des stacks depend du Cooldown
     -- Manager et echoue, expliquer pourquoi (une fois par combat, 10 s de
-    -- marge) plutot qu'une barre muette a 0. Respecte /mw warn.
-    if inCombat and viaCDM and db.warnCDM and not combatHintDone then
+    -- marge) plutot qu'une barre muette a 0. Respecte /mw warn. Inutile
+    -- quand la couche native pilote l'affichage.
+    if inCombat and viaCDM and db.warnCDM and not combatHintDone and not nativeLayer then
         local now = time()
         -- le journal de combat recent suffit a lire les stacks : pas d'alerte
         local cleuOk = cleuStacks ~= nil and (now - (cleuTime or 0)) < 15
@@ -1020,7 +1128,7 @@ local function Update()
     -- Valeur secrete : aucune comparaison possible (barre toujours visible)
     RefreshGlow(stacks)
 
-    local showWarn = cdmMissing and db.warnCDM and true or false
+    local showWarn = cdmMissing and db.warnCDM and not nativeLayer and true or false
     if showWarn then warn:Show() else warn:Hide() end
     if unlocked or db.alwaysShow or inCombat or secret or showWarn or stacks > 0 then
         bar:Show()
@@ -1029,28 +1137,45 @@ local function Update()
         return
     end
 
-    -- Compteur optionnel : une valeur secrete ne peut pas devenir du texte,
-    -- le decompte du journal de combat fournit alors le nombre
+    -- Compteur optionnel : une valeur secrete ne peut pas devenir du texte ;
+    -- en combat la couche native fournit son propre compteur (moteur), hors
+    -- combat le decompte du journal de combat sert de repli
     if db.showCount then
-        local n = stacks
-        if issecretvalue and issecretvalue(n) then n = cleuStacks end
-        if type(n) == "number" and n > 0 then
-            count:SetText(tostring(n))
-            count:Show()
-        else
+        if nativeActive then
             count:Hide()
+        else
+            local n = stacks
+            if issecretvalue and issecretvalue(n) then n = cleuStacks end
+            if type(n) == "number" and n > 0 then
+                count:SetText(tostring(n))
+                count:Show()
+            else
+                count:Hide()
+            end
         end
     else
         count:Hide()
     end
 
-    local n, f = db.colorNormal, db.colorFull
-    for i = 1, MAX_STACKS do
-        local sq = squares[i]
-        sq.fill:SetStatusBarColor(n[1], n[2], n[3], 1)
-        sq.fullFill:SetStatusBarColor(f[1], f[2], f[3], 1)
-        sq.fill:SetValue(stacks)
-        sq.fullFill:SetValue(stacks)
+    if nativeActive then
+        -- le moteur natif remplit les barres du slot : cachons les notres
+        nativeHost:SetAlpha(1)
+        for i = 1, MAX_STACKS do
+            squares[i].fill:Hide()
+            squares[i].fullFill:Hide()
+        end
+    else
+        if nativeHost then nativeHost:SetAlpha(0) end
+        local n, f = db.colorNormal, db.colorFull
+        for i = 1, MAX_STACKS do
+            local sq = squares[i]
+            sq.fill:Show()
+            sq.fullFill:Show()
+            sq.fill:SetStatusBarColor(n[1], n[2], n[3], 1)
+            sq.fullFill:SetStatusBarColor(f[1], f[2], f[3], 1)
+            sq.fill:SetValue(stacks)
+            sq.fullFill:SetValue(stacks)
+        end
     end
 end
 
@@ -1487,12 +1612,14 @@ local function BuildOptions()
                 db[key] = { r, g, b }
                 glowDirty = true
                 if key == "colorBg" then ApplyBgColor() end
+                if key == "colorNormal" or key == "colorFull" then NativeChanged() end
                 paint(); Update()
             end
             local function cancel()
                 db[key] = { old[1], old[2], old[3] }
                 glowDirty = true
                 if key == "colorBg" then ApplyBgColor() end
+                if key == "colorNormal" or key == "colorFull" then NativeChanged() end
                 paint(); Update()
             end
             if ColorPickerFrame.SetupColorPickerAndShow then
@@ -1591,7 +1718,7 @@ local function BuildOptions()
     Check(T("Show the Cooldown Manager warning (red text under the bar, /mw warn)"),
         function() return db.warnCDM end, function(v) db.warnCDM = v; Update() end)
     Check(T("Show the stack count on the bar (/mw count)"),
-        function() return db.showCount end, function(v) db.showCount = v; Update() end)
+        function() return db.showCount end, function(v) db.showCount = v; NativeChanged(); Update() end)
 
     y = y - 6
     Label(T("Colors (/mw color)"), "GameFontNormal"); y = y - 26
@@ -1606,6 +1733,7 @@ local function BuildOptions()
         end
         glowDirty = true
         ApplyBgColor()
+        NativeChanged()
         for _, f in ipairs(refreshers) do f() end
         Update()
     end)
@@ -1751,6 +1879,7 @@ ev:SetScript("OnEvent", function(self, event, unit, ...)
         ApplyBgColor()
         BuildOptions()
         BuildGlowTargets()
+        BuildNativeLayer()
         for _, e in ipairs({ "ACTIONBAR_SLOT_CHANGED", "ACTIONBAR_PAGE_CHANGED", "UPDATE_BONUS_ACTIONBAR" }) do
             pcall(self.RegisterEvent, self, e) -- certains evenements n'existent pas sur tous les clients
         end
@@ -1806,7 +1935,14 @@ ev:SetScript("OnEvent", function(self, event, unit, ...)
             combatHintDone = false
             cdmItemLastSeen = time()
         end
-        if event == "PLAYER_REGEN_ENABLED" and setupDone then RefreshCDMWarning() end
+        if event == "PLAYER_REGEN_ENABLED" then
+            -- couleurs ou compteur changes en combat : reconstruire maintenant
+            if nativeDirty then
+                nativeDirty = false
+                NativeChanged()
+            end
+            if setupDone then RefreshCDMWarning() end
+        end
         glowDirty = true -- barres d'action modifiees : relire les boutons
         Update()
     end
@@ -2039,6 +2175,7 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         if r and g and b and r <= 1 and g <= 1 and b <= 1 then
             db[which] = { r, g, b }
             if which == "colorBg" then ApplyBgColor() end
+            if which ~= "colorBg" then NativeChanged() end
             Update()
         else
             print(PREFIX .. T("/mw color [full] <r> <g> <b>  (values from 0 to 1)"))
@@ -2050,6 +2187,7 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
     elseif cmd == "count" or cmd == "compteur" then
         -- /mw count : compteur de stacks au centre de la barre
         db.showCount = not db.showCount
+        NativeChanged()
         Update()
         print(PREFIX .. T("count ") .. (db.showCount and T("on") or T("off")))
     elseif cmd == "warn" then
