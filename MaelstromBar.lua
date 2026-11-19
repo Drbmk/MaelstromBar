@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 11 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 12 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -207,6 +207,7 @@ local combatHintDone    -- message de combat deja affiche pour ce combat
 -- decompte ; le compteur de stacks s'appuie aussi dessus, une valeur secrete
 -- ne pouvant pas etre convertie en texte.
 local cleuStacks, cleuTime
+local cleuTraceUntil, cleuTraceCount, cleuTraceAura -- diagnostic /mw cleu
 local playerGUID
 local CLEU_AURA = {
     SPELL_AURA_APPLIED = true, SPELL_AURA_REFRESH = true,
@@ -1057,6 +1058,16 @@ end
 local function OnCombatLog()
     if not CombatLogGetCurrentEventInfo then return end
     local _, cev, _, _, _, _, _, dstGUID, _, _, _, spellId, spellName, _, auraType, amount = CombatLogGetCurrentEventInfo()
+    if cleuTraceUntil and time() < cleuTraceUntil then
+        cleuTraceCount = cleuTraceCount + 1
+        if dstGUID == playerGUID and CLEU_AURA[cev] then
+            cleuTraceAura = cleuTraceAura + 1
+            local amt = amount
+            if issecretvalue and issecretvalue(amt) then amt = "<valeur secrete>" end
+            print(PREFIX .. cev .. " | " .. tostring(spellId) .. " " .. tostring(spellName)
+                .. " | type=" .. tostring(auraType) .. " | amount=" .. tostring(amt))
+        end
+    end
     if not CLEU_AURA[cev] then return end
     if dstGUID ~= playerGUID then return end
     if auraType ~= "BUFF" and auraType ~= "HELPFUL" then return end
@@ -1777,6 +1788,18 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         print(PREFIX .. (unlocked and T("unlocked (drag the bar)") or T("locked")))
     elseif cmd == "setup" then
         SetupCooldownManager(true)
+    elseif cmd == "cleu" then
+        -- /mw cleu : tracer 20 s le journal de combat (diagnostic du repli).
+        -- Montre les evenements d'aura du joueur : si la trace reste vide, le
+        -- journal n'est pas emis ; si amount est secret, le repli est mort.
+        cleuTraceUntil, cleuTraceCount, cleuTraceAura = time() + 20, 0, 0
+        print(PREFIX .. "trace du journal de combat pendant 20 s : entre en combat et frappe des ennemis, colle le resultat")
+        if C_Timer and C_Timer.After then
+            C_Timer.After(21, function()
+                print(PREFIX .. "journal : " .. tostring(cleuTraceCount) .. " evenements recus dont "
+                    .. tostring(cleuTraceAura) .. " auras sur toi")
+            end)
+        end
     elseif cmd == "log" then
         -- /mw log : relire les erreurs Lua enregistrees ; /mw log clear : vider
         db.errors = db.errors or {}
