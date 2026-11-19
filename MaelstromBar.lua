@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 13 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 14 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -207,7 +207,7 @@ local combatHintDone    -- message de combat deja affiche pour ce combat
 -- decompte ; le compteur de stacks s'appuie aussi dessus, une valeur secrete
 -- ne pouvant pas etre convertie en texte.
 local cleuStacks, cleuTime
-local cleuTraceUntil, cleuTraceCount, cleuTraceAura -- diagnostic /mw cleu
+local cleuTraceUntil, cleuTraceCount, cleuTraceAura, cleuTraceLast -- diagnostic /mw cleu
 local cleuEvents -- statut d'enregistrement des evenements du journal (diagnostic)
 local playerGUID
 local CLEU_AURA = {
@@ -1768,6 +1768,12 @@ ev:SetScript("OnEvent", function(self, event, unit)
             end)
         end
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" or event == "COMBAT_LOG_EVENT" then
+        -- comptage brut ici : meme si OnCombatLog rend la main aussitot
+        -- (CombatLogGetCurrentEventInfo absent...), la trace doit le montrer
+        if cleuTraceUntil and time() < cleuTraceUntil then
+            cleuTraceCount = cleuTraceCount + 1
+            cleuTraceLast = event
+        end
         OnCombatLog()
     elseif event == "UNIT_AURA" then
         if unit == "player" then Update() end
@@ -1810,8 +1816,14 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         print(PREFIX .. "trace du journal de combat pendant 20 s : entre en combat et frappe des ennemis, colle le resultat")
         if C_Timer and C_Timer.After then
             C_Timer.After(21, function()
+                local st = ""
+                if type(cleuEvents) == "table" then
+                    for ev, s in pairs(cleuEvents) do st = st .. " | " .. ev .. ": " .. tostring(s) end
+                end
                 print(PREFIX .. "journal : " .. tostring(cleuTraceCount) .. " evenements recus dont "
-                    .. tostring(cleuTraceAura) .. " auras sur toi")
+                    .. tostring(cleuTraceAura) .. " auras sur toi | dernier: " .. tostring(cleuTraceLast)
+                    .. " | CombatLogGetCurrentEventInfo: " .. tostring(CombatLogGetCurrentEventInfo ~= nil)
+                    .. st)
             end)
         end
     elseif cmd == "log" then
