@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 12 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 13 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -208,6 +208,7 @@ local combatHintDone    -- message de combat deja affiche pour ce combat
 -- ne pouvant pas etre convertie en texte.
 local cleuStacks, cleuTime
 local cleuTraceUntil, cleuTraceCount, cleuTraceAura -- diagnostic /mw cleu
+local cleuEvents -- statut d'enregistrement des evenements du journal (diagnostic)
 local playerGUID
 local CLEU_AURA = {
     SPELL_AURA_APPLIED = true, SPELL_AURA_REFRESH = true,
@@ -1736,9 +1737,17 @@ ev:SetScript("OnEvent", function(self, event, unit)
         self:RegisterEvent("PLAYER_REGEN_ENABLED")
         self:RegisterEvent("PLAYER_ENTERING_WORLD")
         playerGUID = (UnitGUID and UnitGUID("player")) or playerGUID
+        cleuEvents = cleuEvents or {}
         if CombatLogGetCurrentEventInfo then
-            -- journal de combat : repli de lecture en combat (voir OnCombatLog)
-            pcall(self.RegisterEvent, self, "COMBAT_LOG_EVENT_UNFILTERED")
+            -- journal de combat : repli de lecture en combat (voir OnCombatLog).
+            -- Plusieurs noms possibles selon les clients : tous ceux qui
+            -- s'enregistrent sont ecoutes, le statut est visible via /mw cleu.
+            for _, ev in ipairs({ "COMBAT_LOG_EVENT_UNFILTERED", "COMBAT_LOG_EVENT" }) do
+                local ok, err = pcall(self.RegisterEvent, self, ev)
+                cleuEvents[ev] = ok and "enregistre" or tostring(err)
+            end
+        else
+            cleuEvents["CombatLogGetCurrentEventInfo"] = "absent"
         end
 
         -- Integration au menu d'edition de l'interface (clients qui l'ont)
@@ -1758,7 +1767,7 @@ ev:SetScript("OnEvent", function(self, event, unit)
                 pcall(SetupCooldownManager, false)
             end)
         end
-    elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
+    elseif event == "COMBAT_LOG_EVENT_UNFILTERED" or event == "COMBAT_LOG_EVENT" then
         OnCombatLog()
     elseif event == "UNIT_AURA" then
         if unit == "player" then Update() end
@@ -1792,6 +1801,11 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         -- /mw cleu : tracer 20 s le journal de combat (diagnostic du repli).
         -- Montre les evenements d'aura du joueur : si la trace reste vide, le
         -- journal n'est pas emis ; si amount est secret, le repli est mort.
+        if type(cleuEvents) == "table" then
+            for ev, st in pairs(cleuEvents) do print(PREFIX .. ev .. " : " .. tostring(st)) end
+        else
+            print(PREFIX .. "journal de combat : enregistrement non tente")
+        end
         cleuTraceUntil, cleuTraceCount, cleuTraceAura = time() + 20, 0, 0
         print(PREFIX .. "trace du journal de combat pendant 20 s : entre en combat et frappe des ennemis, colle le resultat")
         if C_Timer and C_Timer.After then
