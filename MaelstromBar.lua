@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 26 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 27 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -29,7 +29,6 @@ if GetLocale() == "frFR" then
         ["3 stacks"] = "3 stacks",
         ["Stop"] = "Arrêter",
         ["Buff name to track (/mw aura), leave empty by default"] = "Nom du buff à suivre (/mw aura), laisser vide par défaut",
-        ["Reset position (/mw reset)"] = "Réinitialiser la position (/mw reset)",
         ["unlocked (drag the bar)"] = "déverrouillée (glisse la barre)",
         ["locked"] = "verrouillée",
         ["active buffs (index, name, stacks, id)"] = "buffs actifs (index, nom, stacks, id)",
@@ -41,8 +40,6 @@ if GetLocale() == "frFR" then
         ["count position: above, center or below (/mw count pos ...)"] = "position du compteur : au-dessus, au centre ou en dessous (/mw count pos …)",
         ["count offset: "] = "décalage du compteur : ",
         ["count offset: /mw count offset x y (pixels)"] = "décalage : /mw count offset x y (pixels)",
-        ["warning "] = "avertissement ",
-        ["Show the Cooldown Manager warning (red text under the bar, /mw warn)"] = "Afficher l'avertissement du Gestionnaire de temps de recharge (texte rouge sous la barre, /mw warn)",
         ["on"] = "activé",
         ["off"] = "désactivé",
         ["glow on "] = "halo sur ",
@@ -64,12 +61,6 @@ if GetLocale() == "frFR" then
         ["log cleared"] = "journal vidé",
         ["no Lua errors recorded"] = "aucune erreur Lua enregistrée",
         ["%d Lua error(s) recorded, most recent first (/mw log clear to wipe)"] = "%d erreur(s) Lua enregistrée(s), la plus récente d'abord (/mw log clear pour vider)",
-        ["this client does not need the Cooldown Manager"] = "ce client n'a pas besoin du Cooldown Manager",
-        ["not available in combat"] = "indisponible en combat",
-        ["Maelstrom Weapon is not tracked in the Cooldown Manager.\nThe bar stays empty in combat.  /mw setup"] = "Arme du Maelström n'est pas suivie dans le Cooldown Manager.\nLa barre reste vide en combat.  /mw setup",
-        ["Cooldown Manager enabled: "] = "Cooldown Manager activé : ",
-        ["Maelstrom Weapon is tracked in the Cooldown Manager"] = "Arme du Maelström est suivie dans le Cooldown Manager",
-        ["Maelstrom Weapon is not tracked in the Cooldown Manager: the bar will stay empty in combat. Add it to the tracked buffs in the Cooldown Manager settings."] = "Arme du Maelström n'est pas suivie dans le Cooldown Manager : la barre restera vide en combat. Ajoute-la aux buffs suivis dans les réglages du Cooldown Manager.",
         ["Square width"] = "Largeur des carrés",
         ["Square height"] = "Hauteur des carrés",
         ["Spacing between squares"] = "Espacement entre les carrés",
@@ -78,15 +69,6 @@ if GetLocale() == "frFR" then
         ["size: %d x %d, spacing %d"] = "taille : %d x %d, espacement %d",
         ["/mw size <width> <height> [spacing]  (10-80, 6-60, 0-30)"] = "/mw size <largeur> <hauteur> [espacement]  (10-80, 6-60, 0-30)",
         ["Reset position and size (/mw reset)"] = "Réinitialiser la position et la taille (/mw reset)",
-        ["the Cooldown Manager is not ready yet, checking again..."] = "le Gestionnaire de temps de recharge n'est pas encore prêt, nouvelle vérification en cours…",
-        ["in combat: Maelstrom Weapon is not in the Cooldown Manager, the stacks cannot be read. After combat, type /mw setup."] = "en combat : Arme du Maelström n'est pas dans le Gestionnaire de temps de recharge, les stacks sont illisibles. Hors combat, tape /mw setup.",
-        ["in combat: the Maelstrom Weapon icon of the Cooldown Manager was found but its stacks could not be read; please report this with /mw log."] = "en combat : l'icône Arme du Maelström du Gestionnaire de temps de recharge est trouvée mais ses stacks sont illisibles ; signale-le avec /mw log.",
-        ["cannot confirm without Maelstrom stacks active: on some UIs the icon only exists while the buff is up. Check again right after a fight, with stacks still active."] = "impossible de confirmer sans stacks Arme du Maelström actives : sur certaines UI l'icône n'existe qu'avec le buff actif. Revérifie juste après un combat, stacks encore actives.",
-        ["Cooldown Manager (stacks in combat)"] = "Cooldown Manager (stacks en combat)",
-        ["Maelstrom Weapon is tracked in the Cooldown Manager: the bar works in combat."] = "Arme du Maelström est suivie dans le Cooldown Manager : la barre fonctionne en combat.",
-        ["Maelstrom Weapon is not tracked in the Cooldown Manager: the bar stays empty in combat."] = "Arme du Maelström n'est pas suivie dans le Cooldown Manager : la barre reste vide en combat.",
-        ["Fix: press Open the Cooldown Manager settings below, then add Maelstrom Weapon to the tracked buffs by hand, in the Enhancements section of the window that opens (an addon cannot change that list). Press Check again afterwards."] = "Correction : appuie sur « Ouvrir les réglages du Cooldown Manager » ci-dessous, puis ajoute Arme du Maelström aux buffs suivis à la main, dans la section « Améliorations » de la fenêtre qui s'ouvre (un addon ne peut pas modifier cette liste). Appuie ensuite sur « Vérifier à nouveau ».",
-        ["cannot click that in combat, retry out of combat"] = "clic impossible en combat, réessaie hors combat",
         ["in combat the game engine itself displays the stacks: everything is fine."] = "en combat, le moteur du jeu affiche lui-même les stacks : tout va bien.",
         ["this client does not let the addon display the stacks in combat."] = "ce client ne permet pas à l'addon d'afficher les stacks en combat.",
         ["the combat display is built out of combat; try again after combat."] = "l'affichage de combat se construit hors combat ; réessaie après le combat.",
@@ -94,19 +76,10 @@ if GetLocale() == "frFR" then
         ["In combat"] = "En combat",
         ["The stacks are displayed in combat by the game engine itself: no configuration is needed."] = "En combat, les stacks sont affichées par le moteur du jeu lui-même : aucune configuration n'est nécessaire.",
         ["The combat display is built out of combat; it will be ready for the next fight."] = "L'affichage de combat se construit hors combat ; il sera prêt pour le prochain combat.",
-        ["Open the Cooldown Manager settings"] = "Ouvrir les réglages du Cooldown Manager",
-        ["Cooldown Manager settings not found: open the game options and look for them"] = "réglages du Cooldown Manager introuvables : ouvre les options du jeu et cherche-les",
-        ["The Cooldown Manager cannot be checked in combat; reopen this panel out of combat."] = "Le Cooldown Manager ne peut pas être vérifié en combat ; rouvre ce panneau hors combat.",
-        ["Cannot confirm yet: no Maelstrom stacks active, or the Cooldown Manager is still loading. If the stacks cannot be read in combat, a message in chat will say so."] = "Impossible de confirmer pour l'instant : pas de stacks Arme du Maelström actives, ou Cooldown Manager en cours de chargement. Si les stacks sont illisibles en combat, un message le dira dans le chat.",
-        ["Check again"] = "Vérifier à nouveau",
-        ["The Cooldown Manager is disabled: the stacks cannot be read in combat. Press Check again to enable it."] = "Le Cooldown Manager est désactivé : les stacks sont illisibles en combat. Appuie sur « Vérifier à nouveau » pour l'activer.",
     }
 end
--- Nom du "Cooldown Manager" tel que le client l'affiche dans ses menus
-local CDM_NAME = (type(COOLDOWN_VIEWER_LABEL) == "string" and COOLDOWN_VIEWER_LABEL)
-    or (GetLocale() == "frFR" and "Gestionnaire de temps de recharge") or "Cooldown Manager"
-CDM_NAME = CDM_NAME:gsub("%%", "%%%%")
-local function T(s) return ((LOC[s] or s):gsub("Cooldown Manager", CDM_NAME)) end
+-- Traduction des textes : cle anglaise, valeur localisee (frFR).
+local function T(s) return LOC[s] or s end
 
 local DEFAULTS = {
     point = "CENTER", relPoint = "CENTER", x = 0, y = -150,
@@ -158,377 +131,6 @@ local function IsMaelstromAura(name, spellId)
         if db and db.auraName and lower == db.auraName:lower() then return true end
     end
     return false
-end
-
--- En combat, ce client masque les auras du joueur ("secret") : la lecture par ID
--- renvoie nil et le balayage par index est refuse. La barre n'est donc fiable
--- que hors combat ; en combat elle retombe a 0 sans erreur.
-local function AurasSecret()
-    return C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret()
-end
-
--- En combat : le Cooldown Manager de Blizzard a le droit de lire l'aura. On retrouve
--- son icone Maelstrom Weapon et on lui emprunte les donnees d'aura ("applications"
--- est alors une valeur secrete, affichable par les StatusBar).
-local CDM_SPELLS = { [408498] = true, [408505] = true, [53817] = true, [344179] = true }
-local CDM_VIEWERS = { "BuffIconCooldownViewer", "BuffBarCooldownViewer" }
-
-local function Plain(v) -- valeur utilisable dans un test (ni nil ni secrete)
-    if v == nil or (issecretvalue and issecretvalue(v)) then return nil end
-    return v
-end
-
-local function Has(v) -- non nil, sans comparer une valeur secrete
-    return (issecretvalue and issecretvalue(v)) or v ~= nil
-end
-
-local function IsMaelstromItem(f)
-    local function try(m)
-        if not f[m] then return nil end
-        local ok, r = pcall(f[m], f)
-        return ok and Plain(r) or nil
-    end
-    local a, b = try("GetSpellID"), try("GetAuraSpellID")
-    if (a and CDM_SPELLS[a]) or (b and CDM_SPELLS[b]) then return true end
-    local ci = f.cooldownInfo
-    if type(ci) == "table" then
-        local s, o = Plain(ci.spellID), Plain(ci.overrideSpellID)
-        if (s and CDM_SPELLS[s]) or (o and CDM_SPELLS[o]) then return true end
-    end
-    return false
-end
-
-local cdmItem      -- icone du Cooldown Manager trouvee (cachee : evite de rebalayer a chaque lecture)
-local cdmCooldown  -- lectures restantes avant un nouveau balayage complet apres un echec
-
--- Diagnostique en combat : si la lecture des stacks via le Cooldown Manager
--- echoue, un message explique pourquoi (une fois par combat) plutot qu'une
--- barre muette a 0, qui donne des rapports "ne suit pas en combat" sans cause.
-local cdmItemLastSeen   -- horodatage de la derniere icone vue (le suivi fonctionne)
-local cdmValueEverRead  -- vrai : au moins une valeur de stacks lue depuis le login
-local viaCDM            -- vrai : la lecture courante des stacks passe par le Cooldown Manager
-local combatHintDone    -- message de combat deja affiche pour ce combat
-
--- Journal de combat : repli pour lire les stacks en combat quand ni la lecture
--- directe ni l'icone du Cooldown Manager ne fonctionnent (certains clients
--- rendent l'icone mais refusent sa lecture). Les evenements d'aura
--- (SPELL_AURA_APPLIED_DOSE...) portent le nombre de stacks et ne passent pas
--- par l'API des auras. Hors combat, la lecture directe resynchronise ce
--- decompte ; le compteur de stacks s'appuie aussi dessus, une valeur secrete
--- ne pouvant pas etre convertie en texte.
-local cleuStacks, cleuTime
-local cleuTraceUntil, cleuTraceCount, cleuTraceAura, cleuTraceLast, cleuTraceRaw -- diagnostic /mw cleu
-local cleuEvents -- statut d'enregistrement des evenements du journal (diagnostic)
-local playerGUID
-local CLEU_AURA = {
-    SPELL_AURA_APPLIED = true, SPELL_AURA_REFRESH = true,
-    SPELL_AURA_APPLIED_DOSE = true, SPELL_AURA_REMOVED_DOSE = true,
-    SPELL_AURA_REMOVED = true,
-}
-
-local function ReadAuraFromFrame(f)
-    -- Lecture seule : on n'appelle pas GetAuraData. Cette methode peut rafraichir
-    -- le cache de l'icone depuis notre contexte "tainted" ; Blizzard relit alors
-    -- des donnees contaminees dans son propre code et plante en combat
-    -- ("attempt to compare a secret number value"). Seules les lectures pures
-    -- sont autorisees : le cache, puis l'ID d'instance via l'API C.
-    if f.GetAuraDataCached then
-        local ok, d = pcall(f.GetAuraDataCached, f)
-        if ok and type(d) == "table" and Has(d.applications) then return d.applications end
-    end
-    if f.GetAuraSpellInstanceID then
-        local ok, id = pcall(f.GetAuraSpellInstanceID, f)
-        if ok and Has(id) then
-            local ok2, d = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, "player", id)
-            if ok2 and type(d) == "table" and Has(d.applications) then return d.applications end
-        end
-    end
-    return nil
-end
-
-local function ReadFromCooldownManager()
-    local now = time()
-    -- icone cachee d'abord : lecture directe, rapide, des que le buff est suivi
-    if cdmItem then
-        local v = ReadAuraFromFrame(cdmItem)
-        if v ~= nil then
-            cdmItemLastSeen, cdmValueEverRead = now, true
-            return v
-        end
-        cdmItem = nil -- buff tombe ou icone retiree : il faut rechercher l'icone
-    elseif cdmCooldown and cdmCooldown > 0 then
-        cdmCooldown = cdmCooldown - 1
-        return nil
-    end
-    for _, vn in ipairs(CDM_VIEWERS) do
-        local v = _G[vn]
-        if v then
-            local items
-            if v.GetItemFrames then
-                local ok, r = pcall(v.GetItemFrames, v)
-                if ok then items = r end
-            end
-            items = items or { v:GetChildren() }
-            for _, f in ipairs(items) do
-                if IsMaelstromItem(f) then
-                    cdmItemLastSeen = now -- icone presente : le suivi fonctionne
-                    local val = ReadAuraFromFrame(f)
-                    if val ~= nil then
-                        cdmValueEverRead = true
-                        cdmItem, cdmCooldown = f, nil
-                        return val
-                    end
-                end
-            end
-        end
-    end
-    -- aucune icone Maelstrom visible : patienter un peu avant de tout rebalayer
-    cdmCooldown = 2
-    return nil
-end
-
----------------------------------------------------------------- verification du Cooldown Manager
--- La lecture en combat depend de l'icone Maelstrom Weapon du Cooldown Manager :
--- on verifie qu'il est actif et que le buff y est suivi, puis on previent.
--- Interdit d'y ecrire depuis l'addon : les reglages du Cooldown Manager doivent
--- etre modifies a la main dans les options du jeu, sinon son code est "tainted".
-local setupDone = false    -- la verification de connexion a eu lieu
-local cdmMissing = false   -- vrai : buff non suivi, avertissement affiche sur la barre
-local RefreshCDMWarning    -- defini plus bas (a besoin de la barre)
-
--- Les frames du Cooldown Manager peuvent naitre bien apres le login (UI manette
--- notamment) : tant qu'elles n'existent pas, ou que leurs icones ne sont pas
--- encore creees, la verification est reprise plus tard au lieu de conclure que
--- le buff n'est pas suivi. Sinon l'avertissement rouge apparait a tort au login
--- et ne disparait qu'a la fin du premier combat.
-local CDM_GRACE_RETRIES = 30 -- ~60 s apres le login avant de declarer le buff non suivi
-local cdmGraceLeft = 0       -- ressais restantes de cette periode de grace
-local cdmCheckScheduled = false
-
-local function CooldownViewerExists()
-    for _, vn in ipairs(CDM_VIEWERS) do
-        if _G[vn] then return true end
-    end
-    return false
-end
-
-local function ScheduleCDMCheck(delay)
-    if cdmCheckScheduled or not (C_Timer and C_Timer.After) then return end
-    cdmCheckScheduled = true
-    C_Timer.After(delay, function()
-        cdmCheckScheduled = false
-        RefreshCDMWarning()
-    end)
-end
-
-local function HasMaelstromItem()
-    for _, vn in ipairs(CDM_VIEWERS) do
-        local v = _G[vn]
-        if v then
-            local items
-            if v.GetItemFrames then
-                local ok, r = pcall(v.GetItemFrames, v)
-                if ok then items = r end
-            end
-            for _, f in ipairs(items or { v:GetChildren() }) do
-                if IsMaelstromItem(f) then return true end
-            end
-        end
-    end
-    return false
-end
-
--- cooldownID du buff dans le catalogue du Cooldown Manager (toutes categories)
-local function FindMaelstromCooldownID()
-    local C = C_CooldownViewer
-    if not (C and C.GetCooldownViewerCategorySet and C.GetCooldownViewerCooldownInfo) then return nil end
-    for _, cat in pairs(Enum and Enum.CooldownViewerCategory or {}) do
-        local ok, ids = pcall(C.GetCooldownViewerCategorySet, cat, true)
-        if ok and type(ids) == "table" then
-            for _, id in ipairs(ids) do
-                local ok2, info = pcall(C.GetCooldownViewerCooldownInfo, id)
-                if ok2 and type(info) == "table" then
-                    local hit = CDM_SPELLS[Plain(info.spellID) or 0] or CDM_SPELLS[Plain(info.overrideSpellID) or 0]
-                    if not hit and type(info.linkedSpellIDs) == "table" then
-                        for _, s in ipairs(info.linkedSpellIDs) do
-                            if CDM_SPELLS[Plain(s) or 0] then hit = true end
-                        end
-                    end
-                    if hit then return id, cat end
-                end
-            end
-        end
-    end
-    return nil
-end
-
--- Le catalogue du Cooldown Manager permet parfois de savoir si le buff est
--- suivi sans attendre son icone (qui, sur certaines UI, n'existe qu'avec le
--- buff actif) : on compare l'ensemble de categorie rendu avec l'argument
--- "tout inclure" et sans lui. Renvoie true (suivi), false (non suivi) ou nil
--- (inconnu) ; on ne conclut que si les deux ensembles se differencient
--- clairement, pour ne jamais prevenir a tort.
-local function CatalogTrackedState()
-    local C = C_CooldownViewer
-    if not (C and C.GetCooldownViewerCategorySet and C.GetCooldownViewerCooldownInfo) then return nil end
-    local id = FindMaelstromCooldownID()
-    if not id then return nil end
-    -- champ explicite du descriptif du cooldown, s'il existe
-    local okI, info = pcall(C.GetCooldownViewerCooldownInfo, id)
-    if okI and type(info) == "table" then
-        for _, k in ipairs({ "tracked", "isTracked" }) do
-            local v = Plain(info[k])
-            if v == true then return true end
-            if v == false then return false end
-        end
-    end
-    local foundTracked, totalTracked, totalAll = false, 0, 0
-    for _, cat in pairs(Enum and Enum.CooldownViewerCategory or {}) do
-        local okA, all = pcall(C.GetCooldownViewerCategorySet, cat, true)
-        local okT, tracked = pcall(C.GetCooldownViewerCategorySet, cat, false)
-        if okA and type(all) == "table" and okT and type(tracked) == "table" then
-            for _ in ipairs(all) do totalAll = totalAll + 1 end
-            for _, cid in ipairs(tracked) do
-                totalTracked = totalTracked + 1
-                if cid == id then foundTracked = true end
-            end
-        end
-    end
-    -- ensembles vides, egaux ou suspects : on ne peut pas conclure
-    if totalAll == 0 or totalTracked == 0 or totalTracked >= totalAll then return nil end
-    return foundTracked
-end
-
--- L'absence de l'icone du Cooldown Manager prouve-t-elle le non-suivi ? Oui sur
--- l'UI clavier (l'icone y existe meme sans buff actif, des que le buff est
--- suivi) ; non sur l'UI manette (elle n'y apparait qu'avec le buff actif).
--- On ne conclut donc que si l'UI manette est exclue : aucune manette active.
-local function IconAbsenceIsProof()
-    if C_GamePad and C_GamePad.IsEnabled then
-        local ok, enabled = pcall(C_GamePad.IsEnabled)
-        if ok and enabled == false then return true end
-        if ok and enabled == true then return false end
-    end
-    return false -- manette active ou etat inconnu : prudence
-end
-
--- verbose : detaille chaque etape (commande /mw setup) ; sinon un seul message si echec
-local function SetupCooldownManager(verbose)
-    if not (C_Secrets and C_Secrets.ShouldAurasBeSecret) then
-        if verbose then print(PREFIX .. T("this client does not need the Cooldown Manager")) end
-        return
-    end
-    if InCombatLockdown and InCombatLockdown() then
-        if verbose then print(PREFIX .. T("not available in combat")) end
-        return
-    end
-    local function say(s) if verbose then print(PREFIX .. s) end end
-    say("code rev" .. REV) -- prouve que le code charge est bien le dernier
-
-    -- 1) activer le Cooldown Manager
-    local getCV = (C_CVar and C_CVar.GetCVar) or GetCVar
-    local setCV = (C_CVar and C_CVar.SetCVar) or SetCVar
-    local okG, cur = pcall(getCV, "cooldownViewerEnabled")
-    if okG and cur == "0" then
-        local okS = pcall(setCV, "cooldownViewerEnabled", "1")
-        say(T("Cooldown Manager enabled: ") .. tostring(okS))
-    else
-        say("cooldownViewerEnabled=" .. tostring(okG and cur or "?"))
-    end
-
-    -- 2) deja suivi ?
-    if HasMaelstromItem() then
-        say(T("Maelstrom Weapon is tracked in the Cooldown Manager"))
-        RefreshCDMWarning()
-        return
-    end
-
-    -- 3) pas d'ajout automatique : ecrire dans les reglages du Cooldown Manager
-    -- depuis un addon contamine ses donnees, et le code Blizzard plante ensuite
-    -- en combat ("attempt to compare a secret number value (execution tainted
-    -- by 'MaelstromBar')"). L'ajout du buff aux buffs suivis se fait a la main
-    -- dans les options du jeu ; on se contente de verifier et d'indiquer quoi
-    -- faire si le buff n'y est pas.
-    local id = FindMaelstromCooldownID()
-    say("cooldownID=" .. tostring(id))
-
-    -- 3 bis) dump de l'API (verbose uniquement) : liste des fonctions de
-    -- C_CooldownViewer, champs du descriptif du cooldown, comptage des
-    -- ensembles de categories selon l'argument. Permet de voir ce que ce
-    -- client expose exactement pour determiner le suivi.
-    if verbose then
-        local okDump, errDump = pcall(function()
-            local C = C_CooldownViewer
-            local names = {}
-            for k in pairs(C) do names[#names + 1] = tostring(k) end
-            table.sort(names)
-            say("C_CooldownViewer: " .. table.concat(names, ", "))
-            if id then
-                local okI, info = pcall(C.GetCooldownViewerCooldownInfo, id)
-                if okI and type(info) == "table" then
-                    local fields = {}
-                    for k, v in pairs(info) do
-                        local tv = type(v)
-                        if tv == "string" or tv == "number" or tv == "boolean" then
-                            local pv = Plain(v)
-                            fields[#fields + 1] = tostring(k) .. "=" .. (pv ~= nil and tostring(pv) or "?")
-                        elseif v ~= nil then
-                            fields[#fields + 1] = tostring(k) .. "=(" .. tv .. ")"
-                        end
-                    end
-                    table.sort(fields)
-                    say("cooldown info: " .. table.concat(fields, ", "))
-                end
-                local function cnt(ok, t) return (ok and type(t) == "table") and tostring(#t) or "?" end
-                local function has(ok, t)
-                    if not (ok and type(t) == "table") then return "?" end
-                    for _, cid in ipairs(t) do if cid == id then return "yes" end end
-                    return "no"
-                end
-                for name, cat in pairs(Enum and Enum.CooldownViewerCategory or {}) do
-                    local okA, all = pcall(C.GetCooldownViewerCategorySet, cat, true)
-                    local okT, tracked = pcall(C.GetCooldownViewerCategorySet, cat, false)
-                    local okN, def = pcall(C.GetCooldownViewerCategorySet, cat)
-                    say(string.format("category %s (%s): all=%s/%s tracked=%s/%s default=%s/%s",
-                        tostring(name), tostring(cat),
-                        cnt(okA, all), has(okA, all),
-                        cnt(okT, tracked), has(okT, tracked),
-                        cnt(okN, def), has(okN, def)))
-                end
-                say("info.category=" .. tostring(Plain(info and info.category)))
-                -- etat manette : determine si l'absence d'icone est une preuve
-                do
-                    local bits = {}
-                    if C_GamePad and C_GamePad.IsEnabled then
-                        local okE, en = pcall(C_GamePad.IsEnabled)
-                        bits[#bits + 1] = "IsEnabled=" .. ((okE and tostring(en)) or "?")
-                        if C_GamePad.IsUsingGamepadUI then
-                            local okU, ui = pcall(C_GamePad.IsUsingGamepadUI)
-                            bits[#bits + 1] = "IsUsingGamepadUI=" .. ((okU and tostring(ui)) or "?")
-                        end
-                    else
-                        bits[#bits + 1] = "C_GamePad absent"
-                    end
-                    say("gamepad: " .. table.concat(bits, ", "))
-                end
-            end
-        end)
-        if not okDump then say("catalog dump error: " .. tostring(errDump)) end
-    end
-
-    -- 4) verifier un peu plus tard ; la periode de grace laisse aux icones le temps
-    -- d'apparaitre (UI manette) avant d'afficher l'avertissement
-    C_Timer.After(1, function()
-        if verbose then cdmGraceLeft = 0 end -- diagnostic demande : reponse immediate
-        local status = RefreshCDMWarning(verbose)
-        if status == "pending" and verbose then
-            print(PREFIX .. T("the Cooldown Manager is not ready yet, checking again..."))
-        elseif status == "unknown" and verbose then
-            print(PREFIX .. T("cannot confirm without Maelstrom stacks active: on some UIs the icon only exists while the buff is up. Check again right after a fight, with stacks still active."))
-        elseif status == "tracked" and verbose then
-            print(PREFIX .. T("Maelstrom Weapon is tracked in the Cooldown Manager"))
-        end
-    end)
 end
 
 local function ReadStacks()
@@ -599,7 +201,7 @@ end
 ---------------------------------------------------------------- journal des erreurs Lua
 -- Une erreur qui surgit en combat est facile a rater sans BugSack. On installe
 -- un gestionnaire d'erreurs qui enregistre tout (les notres comme celles du code
--- Blizzard, ex. taint du Cooldown Manager) dans les SavedVariables, puis on
+-- Blizzard) dans les SavedVariables, puis on
 -- laisse la main au gestionnaire precedent (BugSack, fenetre Blizzard) pour ne
 -- rien casser. Consultation : /mw log.
 local MAX_LOGGED_ERRORS = 50
@@ -679,14 +281,6 @@ overlay.label = overlay:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 overlay.label:SetPoint("BOTTOM", overlay, "TOP", 0, 2)
 overlay.label:SetText(T("MaelstromBar - drag to move"))
 
--- Avertissement visible sous la barre quand le buff n'est pas suivi par le Cooldown Manager
-local warn = bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-warn:SetPoint("TOP", bar, "BOTTOM", 0, -4)
-warn:SetWidth(260)
-warn:SetTextColor(1, 0.25, 0.2)
-warn:SetText(T("Maelstrom Weapon is not tracked in the Cooldown Manager.\nThe bar stays empty in combat.  /mw setup"))
-warn:Hide()
-
 -- Compteur de stacks (option /mw count) : au-dessus (defaut), au centre ou
 -- en dessous de la barre ; position et decalage reglables (/mw count pos,
 -- /mw count offset). La meme ancre sert au compteur natif (combat).
@@ -753,10 +347,10 @@ end
 -- ensuite "interdits" : on les ancre sur nos carres pendant l'init, leur
 -- geometrie suit donc /mw size automatiquement. Changer les couleurs ou le
 -- compteur impose de reconstruire la couche (hors combat) ; sans cette API
--- (autres clients), le repli Cooldown Manager d'origine reste en place.
+-- (autres clients), il n'y a simplement pas d'affichage en combat.
 local nativeHost        -- frame hote : son alpha pilote la visibilite de la couche
 local nativeLayer       -- couche construite : { host, fills, count }
-local nativeUnavailable -- ce client n'expose pas l'API : repli Cooldown Manager
+local nativeUnavailable -- ce client n'expose pas l'API : pas d'affichage en combat
 local nativeDirty       -- reconstruction demandee (attend la fin du combat)
 local glowDirty = true               -- declare ici : utilise aussi par NativeChanged (halos)
 local ClearGlowNatives               -- defini dans la section halo (pilotes natifs des halos)
@@ -1247,18 +841,6 @@ local function RefreshGlow(stacks)
 end
 
 ---------------------------------------------------------------- logique
--- Buff Maelstrom actif et lisible ? (hors combat). Retourne nil si la lecture
--- est impossible. Sert a ne prevenir que lorsque l'absence d'icone du Cooldown
--- Manager est reelle : sans buff actif, l'icone peut simplement ne pas exister
--- (elle n'apparait parfois qu'avec le buff actif, UI manette notamment).
-local function MaelstromBuffActive()
-    if AurasSecret() then return nil end
-    local ok, res = pcall(ReadStacks)
-    if not ok then return nil end
-    if issecretvalue and issecretvalue(res) then return nil end
-    return (res or 0) > 0
-end
-
 local function Update()
     if not db then return end
     local stacks = GetStacks()
@@ -1326,109 +908,6 @@ local function Update()
     end
 end
 
--- Decompte des stacks tenu par le journal de combat (cleuStacks) : mise a
--- jour sur chaque evenement d'aura Maelstrom du joueur.
-local function OnCombatLog(event, ...)
-    local cleuArgs
-    local _, cev, _, _, _, _, _, dstGUID, _, _, _, spellId, spellName, _, auraType, amount
-    if CombatLogGetCurrentEventInfo then
-        _, cev, _, _, _, _, _, dstGUID, _, _, _, spellId, spellName, _, auraType, amount = CombatLogGetCurrentEventInfo()
-    else
-        -- ce client n'a pas CombatLogGetCurrentEventInfo : la charge utile du
-        -- journal peut venir en arguments de l'evenement (anciens clients)
-        cleuArgs = { ... }
-        local u = unpack or table.unpack
-        _, cev, _, _, _, _, _, dstGUID, _, _, _, spellId, spellName, _, auraType, amount = u(cleuArgs)
-    end
-    if cleuTraceUntil and time() < cleuTraceUntil then
-        if cleuArgs then
-            cleuTraceRaw = cleuTraceRaw + 1
-            if cleuTraceRaw <= 8 then
-                local parts = { "argc=" .. tostring(#cleuArgs) }
-                for i = 1, math.min(#cleuArgs, 16) do parts[#parts + 1] = tostring(cleuArgs[i]) end
-                print(PREFIX .. "brut: " .. table.concat(parts, " | "))
-            end
-        end
-        if dstGUID == playerGUID and CLEU_AURA[cev] then
-            cleuTraceAura = cleuTraceAura + 1
-            local amt = amount
-            if issecretvalue and issecretvalue(amt) then amt = "<valeur secrete>" end
-            print(PREFIX .. cev .. " | " .. tostring(spellId) .. " " .. tostring(spellName)
-                .. " | type=" .. tostring(auraType) .. " | amount=" .. tostring(amt))
-        end
-    end
-    if not CLEU_AURA[cev] then return end
-    if dstGUID ~= playerGUID then return end
-    if auraType ~= "BUFF" and auraType ~= "HELPFUL" then return end
-    if not IsMaelstromAura(spellName, spellId) then return end
-    amount = Plain(amount)
-    if cev == "SPELL_AURA_REMOVED" then
-        cleuStacks = 0
-    elseif cev == "SPELL_AURA_APPLIED" then
-        cleuStacks = (amount and amount > 0) and amount or 1
-    elseif cev == "SPELL_AURA_APPLIED_DOSE" then
-        cleuStacks = (amount and amount > 0) and amount or (cleuStacks or 0) + 1
-    elseif cev == "SPELL_AURA_REMOVED_DOSE" then
-        cleuStacks = (amount and amount >= 0) and amount or math.max((cleuStacks or 1) - 1, 0)
-    else -- SPELL_AURA_REFRESH : certains clients y mettent le compte
-        if amount and amount > 0 then cleuStacks = amount end
-        if not cleuStacks then cleuStacks = 1 end
-    end
-    cleuTime = time()
-    Update()
-end
-
-RefreshCDMWarning = function(force)
-    -- force (commande /mw setup) : rapporter meme si l'avertissement est coupe
-    -- inutile sur les clients sans auras secretes ; pas de verification en combat
-    if not (C_Secrets and C_Secrets.ShouldAurasBeSecret) then return end
-    if UnitAffectingCombat("player") then return end
-    if not CooldownViewerExists() then
-        -- frames pas encore creees (login lent, UI manette) : reverifier plus tard,
-        -- sans afficher l'avertissement pour autant
-        if cdmGraceLeft > 0 then
-            cdmGraceLeft = cdmGraceLeft - 1
-            ScheduleCDMCheck(2)
-        end
-        return "pending"
-    end
-    local missing = not HasMaelstromItem()
-    if missing then
-        local active = MaelstromBuffActive()
-        if active == nil or not active then
-            -- Buff absent ou illisible : l'icone du Cooldown Manager n'existe
-            -- parfois qu'avec le buff actif (UI manette notamment). Le catalogue
-            -- ou l'exclusion de l'UI manette peut quand meme trancher ; sans
-            -- certitude, pas d'avertissement.
-            if CatalogTrackedState() ~= false and not IconAbsenceIsProof() then
-                if cdmMissing then cdmMissing = false; Update() end
-                ScheduleCDMCheck(10)
-                return "unknown"
-            end
-            -- preuve de non-suivi : avertissement legitime (suite ci-dessous)
-        end
-        if cdmGraceLeft > 0 then
-            -- buff actif mais icones pas encore apparues : laisser le temps
-            cdmGraceLeft = cdmGraceLeft - 1
-            ScheduleCDMCheck(2)
-            return "pending"
-        end
-    end
-    if missing ~= cdmMissing then
-        cdmMissing = missing
-        if missing and (db.warnCDM or force) then
-            print(PREFIX .. T("Maelstrom Weapon is not tracked in the Cooldown Manager: the bar will stay empty in combat. Add it to the tracked buffs in the Cooldown Manager settings."))
-        end
-        Update()
-    end
-    if cdmMissing then
-        -- l'icone peut apparaitre plus tard (reglages modifies, UI manette) :
-        -- reverifier regulierement, l'avertissement disparait alors tout seul,
-        -- sans attendre la fin d'un combat
-        ScheduleCDMCheck(10)
-    end
-    return missing and "missing" or "tracked"
-end
 
 ---------------------------------------------------------------- mise a jour en temps reel
 -- Les seuls evenements d'auras ne suffisent pas : UNIT_AURA est retarde (maj
@@ -1455,240 +934,6 @@ local function SetUnlocked(state)
     unlocked = state and true or false
     if unlocked then overlay:Show() else overlay:Hide() end
     Update()
-end
-
--- Recherche d'un bouton visible par son libelle : les noms des frames de la
--- fenetre "Parametres avances" de ce client sont inconnus, mais ses libelles
--- sont localises et stables. Attention, string.lower ne touche pas les lettres
--- accentuees (multi-octets) : les motifs sont coupes avant la lettre accentuee.
-local function FrameLabelTexts(f)
-    local texts = {}
-    local function Add(t)
-        if type(t) == "string" and #t > 0 then texts[#texts + 1] = t end
-    end
-    if f.GetText then
-        local ok, t = pcall(f.GetText, f)
-        if ok then Add(t) end
-    end
-    if f.GetFontString then
-        local ok, fs = pcall(f.GetFontString, f)
-        if ok and fs and fs ~= f and fs.GetText then
-            local ok2, t = pcall(fs.GetText, fs)
-            if ok2 then Add(t) end
-        end
-    end
-    local okR, regions = pcall(f.GetRegions, f)
-    if okR and type(regions) == "table" then
-        for _, r in ipairs(regions) do
-            if r ~= f and type(r) == "table" and r.GetText then
-                local ok2, t = pcall(r.GetText, r)
-                if ok2 then Add(t) end
-            end
-        end
-    end
-    return texts
-end
-
-local function FindButtonsBy(predicate)
-    -- parcourt les frames visibles et rend les boutons dont un libelle
-    -- correspond, avec la liste de tous les libelles vus (diagnostic)
-    local found, labels = {}, {}
-    local visited = 0
-    local function Walk(f, depth)
-        if depth > 12 or visited > 5000 then return end
-        visited = visited + 1
-        if type(f) == "table" and f.IsVisible and f.GetChildren then
-            local okV, vis = pcall(f.IsVisible, f)
-            if okV and vis then
-                local isBtn = false
-                for _, objType in ipairs({ "Button", "CheckButton" }) do
-                    local ok, is = pcall(f.IsObjectType, f, objType)
-                    if ok and is then isBtn = true end
-                end
-                if isBtn and f.Click then
-                    for _, t in ipairs(FrameLabelTexts(f)) do
-                        labels[#labels + 1] = t
-                        if predicate(t:lower()) then found[#found + 1] = { frame = f, label = t } end
-                    end
-                end
-                for _, c in ipairs({ f:GetChildren() }) do Walk(c, depth + 1) end
-            end
-        end
-    end
-    Walk(UIParent, 0)
-    return found, labels
-end
-
--- Options > Avancees > "Parametre avance" ouvre une fenetre dediee dont la
--- section "Ameliorations" gere les buffs suivis du Cooldown Manager.
-local function ClickAdvancedSettings()
-    local found, labels = FindButtonsBy(function(n)
-        return (n:find("param", 1, true) and n:find("avanc", 1, true))
-            or (n:find("advanced", 1, true) and n:find("setting", 1, true))
-    end)
-    if #found == 0 then
-        print(PREFIX .. "« Paramètre avancé » introuvable dans Options > Avancées ; libellés des boutons visibles :")
-        local seen, line = {}, {}
-        local function flush()
-            if #line > 0 then print(PREFIX .. "  " .. table.concat(line, " | ")) end
-            line = {}
-        end
-        for _, t in ipairs(labels) do
-            if not seen[t] then
-                seen[t] = true
-                line[#line + 1] = t
-                if #table.concat(line, " | ") > 180 then flush() end
-            end
-        end
-        flush()
-        return
-    end
-    if InCombatLockdown() then
-        print(PREFIX .. T("cannot click that in combat, retry out of combat"))
-        return
-    end
-    local b = found[1]
-    pcall(b.frame.Click, b.frame)
-    local function openTab()
-        local tabs = FindButtonsBy(function(n)
-            return n:find("lioration", 1, true) or n:find("enhancement", 1, true)
-        end)
-        if #tabs == 0 then return end
-        if InCombatLockdown() then
-            print(PREFIX .. "section « Améliorations » trouvée mais inaccessible en combat")
-            return
-        end
-        pcall(tabs[1].frame.Click, tabs[1].frame)
-    end
-    if C_Timer and C_Timer.After then C_Timer.After(0.4, openTab) else openTab() end
-end
-
--- Ouvre la page des reglages du Cooldown Manager dans les options du jeu.
--- En cas d'echec, liste les categories vues pour diagnostiquer (commande
--- /mw cdmsettings ou bouton du panneau d'options).
-local function OpenCDMSettings()
-    local function listNames(names)
-        local line = {}
-        local function flush()
-            if #line > 0 then print(PREFIX .. "categories: " .. table.concat(line, ", ")) end
-            line = {}
-        end
-        for _, nm in ipairs(names) do
-            line[#line + 1] = nm
-            if #table.concat(line, ", ") > 200 then flush() end
-        end
-        flush()
-    end
-    local function fail(names)
-        print(PREFIX .. T("Cooldown Manager settings not found: open the game options and look for them"))
-        if type(names) == "table" then
-            if #names == 0 then
-                print(PREFIX .. "Settings.GetCategories() n'a rendu aucune categorie")
-            else
-                listNames(names)
-            end
-        end
-    end
-    if InCombatLockdown() then
-        -- ouvrir/clicker les reglages du jeu depuis l'addon en combat declenche
-        -- le popup "action reservee a l'UI Blizzard" : refuser proprement
-        print(PREFIX .. T("cannot click that in combat, retry out of combat"))
-        return
-    end
-    if not (Settings and Settings.OpenToCategory) then
-        print(PREFIX .. "Settings API incomplete : OpenToCategory="
-            .. tostring(Settings and Settings.OpenToCategory or nil))
-        return
-    end
-    local target = CDM_NAME:lower()
-    local function CatName(cat)
-        if cat.GetName then
-            local ok, n = pcall(cat.GetName, cat)
-            if ok and type(n) == "string" then return n end
-        end
-        return type(cat.name) == "string" and cat.name or nil
-    end
-    local function Match(name)
-        if type(name) ~= "string" or #name < 3 then return false end
-        local n = name:lower()
-        return n:find("cooldown", 1, true) or target:find(n, 1, true) or n:find(target, 1, true)
-    end
-    local function Open(cat)
-        local ok = pcall(Settings.OpenToCategory, cat.GetID and cat:GetID() or cat)
-        if not ok then pcall(Settings.OpenToCategory, cat) end
-    end
-    local names = {}
-    local advCat -- categorie "Avancees" / "Advanced" : la page y est cachee sur ce client
-    local function TryCat(cat)
-        -- renvoie vrai si la categorie correspond (et a ete ouverte)
-        if type(cat) ~= "table" then
-            names[#names + 1] = "(" .. type(cat) .. ")"
-            return false
-        end
-        local n = CatName(cat)
-        local okS2, subs = pcall(cat.GetSubcategories, cat)
-        local subCount = (okS2 and type(subs) == "table") and #subs or -1
-        names[#names + 1] = (tostring(n) or "?") .. " [" .. tostring(subCount) .. "]"
-        if Match(n) then Open(cat) return true end
-        if not advCat and type(n) == "string"
-            and n:lower():find("avanc", 1, true) then
-            advCat = cat
-        end
-        if okS2 and type(subs) == "table" then
-            for _, sub in ipairs(subs) do
-                local sn = CatName(sub)
-                names[#names + 1] = (tostring(n) or "?") .. " > " .. (tostring(sn) or "?")
-                if Match(sn) then Open(sub) return true end
-            end
-        end
-        return false
-    end
-    if Settings.GetCategories then
-        local okS, cats = pcall(Settings.GetCategories)
-        if not okS or type(cats) ~= "table" then
-            print(PREFIX .. "Settings.GetCategories() erreur : " .. tostring(cats))
-            return fail()
-        end
-        for _, cat in ipairs(cats) do
-            if type(cat) == "number" and Settings.GetCategory then
-                local okC, real = pcall(Settings.GetCategory, cat)
-                if okC and type(real) == "table" then cat = real end
-            end
-            if TryCat(cat) then return end
-        end
-    elseif Settings.GetCategory then
-        -- ce client n'a pas GetCategories : balayer les categories par ID
-        local misses = 0
-        for id = 1, 300 do
-            local okC, cat = pcall(Settings.GetCategory, id)
-            if okC and type(cat) == "table" then
-                misses = 0
-                if TryCat(cat) then return end
-            else
-                misses = misses + 1
-                if misses >= 25 then break end -- IDs epuises
-            end
-        end
-    else
-        -- aucune enumeration connue : montrer ce que ce client expose
-        local keys = {}
-        for k in pairs(Settings) do keys[#keys + 1] = tostring(k) end
-        table.sort(keys)
-        print(PREFIX .. "Settings: " .. table.concat(keys, ", "))
-        return fail()
-    end
-    if advCat then
-        -- ce client n'a pas de page Cooldown Manager : elle vit dans la
-        -- fenetre "Parametres avances", derriere Options > Avancees
-        Open(advCat)
-        if C_Timer and C_Timer.After then
-            C_Timer.After(0.3, ClickAdvancedSettings)
-        else
-            ClickAdvancedSettings()
-        end
-        return
-    end
-    fail(names)
 end
 
 ---------------------------------------------------------------- panneau d'options
@@ -2066,7 +1311,7 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
                     .. " | minmax=" .. ((okM and (tostring(mn) .. ".." .. tostring(mx))) or "erreur"))
             end
         elseif nativeUnavailable then
-            print(PREFIX .. "couche native : indisponible (repli Cooldown Manager), /mw native retry pour reessayer")
+            print(PREFIX .. "couche native : indisponible sur ce client, /mw native retry pour reessayer")
         elseif InCombatLockdown() then
             print(PREFIX .. "couche native : non construite, en combat (elle se construit hors combat)")
         else

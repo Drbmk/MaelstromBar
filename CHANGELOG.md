@@ -2,13 +2,12 @@
 
 ## 1.5.0
 
-- Fixed ("does not track during combat" with the Cooldown Manager properly configured): in combat, the stacks are now also read from the **combat log** — aura events such as `SPELL_AURA_APPLIED_DOSE` carry the stack count and do not go through the aura API. It is used as a fallback when neither the direct aura read nor the Cooldown Manager's icon can be read, and requires no configuration. Out of combat, the authoritative aura read resynchronizes that count. The in-combat diagnostic messages now only appear when both paths fail.
+- **In combat, the display is now powered by the game engine itself** ("does not track during combat" is fixed for good). On clients that hide player auras from addons, MaelstromBar no longer tries to read the stacks in combat: it lets the client's own aura engine fill the squares, write the stack count and light the glow — the same mechanism the game uses for its own UI. **Zero configuration**: the Cooldown Manager is not needed anymore, and the addon never touches the game's settings. Out of combat, nothing changes (direct aura reads, as always). The combat display is prepared out of combat, so if the addon loads during a fight, it is ready as soon as that fight ends.
+- The **action-bar glow at 5 stacks** works in combat too, driven by the game engine the same way.
 - New: the **background color** of the bar is configurable (options panel, "Bar background", or `/mw color bg R G B`).
-- New: an optional **stack count** displayed in the middle of the bar (options panel or `/mw count`). In combat the number comes from the combat-log count — a hidden ("secret") stack value cannot be turned into text.
-- New: the options panel opens with a **Cooldown Manager** section that guides the setup: colored status (tracked / not tracked with step-by-step fix / disabled / cannot confirm / in combat), a **Check again** button that enables the Cooldown Manager if needed and re-checks, and an **Open the Cooldown Manager settings** button that opens the game's settings right where the tracked buffs live (Options, Advanced category, Advanced settings window, Enhancements section).
-- The tracking status can now be read without active stacks when possible: from the Cooldown Manager's catalog, or — on keyboard UIs, where the icon exists even without the buff — from the icon's absence (a gamepad UI is excluded from that conclusion, since there the icon only exists while the buff is active).
-- Fixed: the options panel now scrolls (the content had grown past the visible area).
-- `/mw setup` no longer claims "not tracked" when it cannot know; it details the Cooldown Manager API when diagnosing (`/mw cdmsettings` opens the settings page).
+- New: an optional **stack count** (options panel or `/mw count`), displayed above the bar by default and working in combat as well (written by the game engine). Its position is fully adjustable: `/mw count pos above|center|below`, a pixel offset with `/mw count offset x y`, or simply **drag it with the mouse in Edit Mode** (`/mw move`) — grab the number, drop it, the position is saved.
+- New: the options panel opens with an **In combat** status section (green: the engine-driven display is ready) and now scrolls properly.
+- Removed, obsolete with the engine-driven combat display: the Cooldown Manager reading path and its red warning, the combat-log fallback, and the commands `/mw warn`, `/mw cdmsettings`, `/mw cdminfo` and `/mw cleu`. `/mw setup` now reports the status of the combat display; `/mw native retry` forces a rebuild out of combat.
 
 ## 1.4.0
 
