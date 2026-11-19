@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 14 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 15 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -207,7 +207,7 @@ local combatHintDone    -- message de combat deja affiche pour ce combat
 -- decompte ; le compteur de stacks s'appuie aussi dessus, une valeur secrete
 -- ne pouvant pas etre convertie en texte.
 local cleuStacks, cleuTime
-local cleuTraceUntil, cleuTraceCount, cleuTraceAura, cleuTraceLast -- diagnostic /mw cleu
+local cleuTraceUntil, cleuTraceCount, cleuTraceAura, cleuTraceLast, cleuTraceRaw -- diagnostic /mw cleu
 local cleuEvents -- statut d'enregistrement des evenements du journal (diagnostic)
 local playerGUID
 local CLEU_AURA = {
@@ -1056,11 +1056,27 @@ end
 
 -- Decompte des stacks tenu par le journal de combat (cleuStacks) : mise a
 -- jour sur chaque evenement d'aura Maelstrom du joueur.
-local function OnCombatLog()
-    if not CombatLogGetCurrentEventInfo then return end
-    local _, cev, _, _, _, _, _, dstGUID, _, _, _, spellId, spellName, _, auraType, amount = CombatLogGetCurrentEventInfo()
+local function OnCombatLog(event, ...)
+    local cleuArgs
+    local _, cev, _, _, _, _, _, dstGUID, _, _, _, spellId, spellName, _, auraType, amount
+    if CombatLogGetCurrentEventInfo then
+        _, cev, _, _, _, _, _, dstGUID, _, _, _, spellId, spellName, _, auraType, amount = CombatLogGetCurrentEventInfo()
+    else
+        -- ce client n'a pas CombatLogGetCurrentEventInfo : la charge utile du
+        -- journal peut venir en arguments de l'evenement (anciens clients)
+        cleuArgs = { ... }
+        local u = unpack or table.unpack
+        _, cev, _, _, _, _, _, dstGUID, _, _, _, spellId, spellName, _, auraType, amount = u(cleuArgs)
+    end
     if cleuTraceUntil and time() < cleuTraceUntil then
-        cleuTraceCount = cleuTraceCount + 1
+        if cleuArgs then
+            cleuTraceRaw = cleuTraceRaw + 1
+            if cleuTraceRaw <= 8 then
+                local parts = { "argc=" .. tostring(#cleuArgs) }
+                for i = 1, math.min(#cleuArgs, 16) do parts[#parts + 1] = tostring(cleuArgs[i]) end
+                print(PREFIX .. "brut: " .. table.concat(parts, " | "))
+            end
+        end
         if dstGUID == playerGUID and CLEU_AURA[cev] then
             cleuTraceAura = cleuTraceAura + 1
             local amt = amount
@@ -1696,7 +1712,7 @@ end
 ---------------------------------------------------------------- evenements
 local ev = CreateFrame("Frame")
 ev:RegisterEvent("PLAYER_LOGIN")
-ev:SetScript("OnEvent", function(self, event, unit)
+ev:SetScript("OnEvent", function(self, event, unit, ...)
     if event == "PLAYER_LOGIN" then
         MaelstromBarDB = MaelstromBarDB or {}
         db = MaelstromBarDB
@@ -1738,16 +1754,14 @@ ev:SetScript("OnEvent", function(self, event, unit)
         self:RegisterEvent("PLAYER_ENTERING_WORLD")
         playerGUID = (UnitGUID and UnitGUID("player")) or playerGUID
         cleuEvents = cleuEvents or {}
-        if CombatLogGetCurrentEventInfo then
-            -- journal de combat : repli de lecture en combat (voir OnCombatLog).
-            -- Plusieurs noms possibles selon les clients : tous ceux qui
-            -- s'enregistrent sont ecoutes, le statut est visible via /mw cleu.
-            for _, ev in ipairs({ "COMBAT_LOG_EVENT_UNFILTERED", "COMBAT_LOG_EVENT" }) do
-                local ok, err = pcall(self.RegisterEvent, self, ev)
-                cleuEvents[ev] = ok and "enregistre" or tostring(err)
-            end
-        else
-            cleuEvents["CombatLogGetCurrentEventInfo"] = "absent"
+        -- journal de combat : repli de lecture en combat (voir OnCombatLog).
+        -- Plusieurs noms possibles selon les clients : tous ceux qui
+        -- s'enregistrent sont ecoutes, le statut est visible via /mw cleu.
+        -- (Certains clients n'ont pas CombatLogGetCurrentEventInfo et passent
+        -- la charge utile en arguments de l'evenement.)
+        for _, ev in ipairs({ "COMBAT_LOG_EVENT_UNFILTERED", "COMBAT_LOG_EVENT" }) do
+            local ok, err = pcall(self.RegisterEvent, self, ev)
+            cleuEvents[ev] = ok and "enregistre" or tostring(err)
         end
 
         -- Integration au menu d'edition de l'interface (clients qui l'ont)
@@ -1812,8 +1826,14 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         else
             print(PREFIX .. "journal de combat : enregistrement non tente")
         end
-        cleuTraceUntil, cleuTraceCount, cleuTraceAura = time() + 20, 0, 0
+        cleuTraceUntil, cleuTraceCount, cleuTraceAura, cleuTraceLast, cleuTraceRaw = time() + 20, 0, 0, nil, 0
         print(PREFIX .. "trace du journal de combat pendant 20 s : entre en combat et frappe des ennemis, colle le resultat")
+        local glob = {}
+        for k in pairs(_G) do
+            if type(k) == "string" and k:lower():find("combatlog", 1, true) then glob[#glob + 1] = k end
+        end
+        table.sort(glob)
+        print(PREFIX .. "API CombatLog* : " .. ((#glob > 0 and table.concat(glob, ", ")) or "aucune"))
         if C_Timer and C_Timer.After then
             C_Timer.After(21, function()
                 local st = ""
