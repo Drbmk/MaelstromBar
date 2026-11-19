@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 25 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 26 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -886,6 +886,37 @@ NativeChanged = function()
     glowDirty = true
 end
 
+-- Poignee de deplacement du compteur (mode edition) : glisser le chiffre
+-- enregistre son decalage par rapport a sa position choisie ; le compteur
+-- natif (combat) est reconstruit a l'arret du glissement.
+local countDrag = CreateFrame("Frame", nil, bar)
+countDrag:SetFrameLevel(overlay:GetFrameLevel() + 1)
+countDrag:EnableMouse(true)
+countDrag:RegisterForDrag("LeftButton")
+countDrag:SetPoint("TOPLEFT", count, "TOPLEFT", -8, 8)
+countDrag:SetPoint("BOTTOMRIGHT", count, "BOTTOMRIGHT", 8, -8)
+countDrag.tex = countDrag:CreateTexture(nil, "OVERLAY")
+countDrag.tex:SetAllPoints()
+SetColor(countDrag.tex, 0.2, 0.8, 0.3, 0.35)
+countDrag:Hide()
+countDrag:SetScript("OnDragStart", function()
+    local x, y = GetCursorPosition()
+    local scale = (bar.GetEffectiveScale and bar:GetEffectiveScale()) or 1
+    countDrag.startX, countDrag.startY = x / scale, y / scale
+    countDrag.baseX, countDrag.baseY = db.countX or 0, db.countY or 0
+    countDrag:SetScript("OnUpdate", function()
+        local x, y = GetCursorPosition()
+        local scale = (bar.GetEffectiveScale and bar:GetEffectiveScale()) or 1
+        db.countX = math.max(-200, math.min(200, math.floor(countDrag.baseX + x / scale - countDrag.startX + 0.5)))
+        db.countY = math.max(-100, math.min(100, math.floor(countDrag.baseY + y / scale - countDrag.startY + 0.5)))
+        ApplyCountPos()
+    end)
+end)
+countDrag:SetScript("OnDragStop", function()
+    countDrag:SetScript("OnUpdate", nil)
+    NativeChanged() -- compteur natif : reconstruction a la nouvelle position
+end)
+
 ---------------------------------------------------------------- halo sur la barre d'action
 -- glowDirty est declare plus haut (section couche native)
 local glowTargets = {}   -- noms (minuscules) et IDs a surligner
@@ -1251,9 +1282,13 @@ local function Update()
     end
 
     -- Compteur optionnel : une valeur secrete ne peut pas devenir du texte ;
-    -- en combat la couche native fournit son propre compteur (moteur)
+    -- en combat la couche native fournit son propre compteur (moteur).
+    -- En mode edition, un chiffre temoin reste visible et se deplace au doigt.
     if db.showCount then
-        if nativeActive then
+        if unlocked then
+            count:SetText((type(stacks) == "number" and stacks > 0) and tostring(stacks) or "5")
+            count:Show()
+        elseif nativeActive then
             count:Hide()
         else
             local n = stacks
@@ -1267,6 +1302,7 @@ local function Update()
     else
         count:Hide()
     end
+    if unlocked and db.showCount then countDrag:Show() else countDrag:Hide() end
 
     if nativeActive then
         -- le moteur natif remplit les barres du slot : cachons les notres
