@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 20 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 21 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -701,6 +701,7 @@ end)
 -- Taille des carres (largeur, hauteur, espacement) : reglable dans le panneau
 -- d'options et par /mw size. La longueur totale de la barre en decoule :
 -- 5 largeurs + 4 espacements.
+local NativeChanged -- defini plus bas : reconstruction de la couche native
 local function ApplySize()
     if not db then return end
     local w = db.sqW or SQ_W
@@ -713,6 +714,8 @@ local function ApplySize()
         sq:ClearAllPoints()
         sq:SetPoint("LEFT", bar, "LEFT", (i - 1) * (w + gap), 0)
     end
+    -- la geometrie de la couche native est figee a sa construction
+    if nativeLayer or nativeHost then NativeChanged() end
 end
 
 -- Couleur de fond des carres (option /mw color bg, panneau d'options)
@@ -758,7 +761,7 @@ end
 local function BuildNativeLayer()
     if nativeLayer or nativeUnavailable or not db then return end
     if InCombatLockdown() then return end -- creation hors combat uniquement
-    local ok = pcall(function()
+    local ok, err = pcall(function()
         local host = CreateFrame("Frame", nil, bar)
         host:SetAllPoints(bar)
         host:SetFrameLevel(bar:GetFrameLevel() + 5)
@@ -774,17 +777,22 @@ local function BuildNativeLayer()
                 frame:ClearAllPoints()
                 frame:SetAllPoints(host)
                 frame:SetFrameLevel(host:GetFrameLevel() + 1)
-                frame:SetMouseClickEnabled(false)
-                frame:EnableMouseMotion(false)
+                pcall(frame.SetMouseClickEnabled, frame, false)
+                pcall(frame.EnableMouseMotion, frame, false)
+                -- geometrie figee a la construction (memes carres que la barre) :
+                -- /mw size marque la couche a reconstruire
+                local w = db.sqW or SQ_W
+                local h = db.sqH or SQ_H
+                local gap = db.sqGap or SQ_GAP
                 local cn = db.colorNormal or DEFAULTS.colorNormal
                 local cf = db.colorFull or DEFAULTS.colorFull
                 for i = 1, MAX_STACKS do
+                    local x = (i - 1) * (w + gap)
                     local function NativeBar(lo, hi, level, c)
                         local s = CreateFrame("StatusBar", nil, frame)
-                        -- ancre vivante sur le carre : suit /mw size tout seul
-                        s:SetPoint("TOPLEFT", squares[i], "TOPLEFT", 2, -2)
-                        s:SetPoint("BOTTOMRIGHT", squares[i], "BOTTOMRIGHT", -2, 2)
-                        s:SetFrameLevel(squares[i]:GetFrameLevel() + level)
+                        s:SetPoint("TOPLEFT", frame, "TOPLEFT", x + 2, -2)
+                        s:SetPoint("BOTTOMRIGHT", frame, "TOPLEFT", x + w - 2, -(h - 2))
+                        s:SetFrameLevel(frame:GetFrameLevel() + level)
                         s:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
                         s:SetStatusBarColor(c[1], c[2], c[3], 1)
                         -- le moteur ecrit lui-meme la valeur ; min..max = i-1..i,
@@ -797,7 +805,7 @@ local function BuildNativeLayer()
                 end
                 if db.showCount then
                     nativeCount = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-                    nativeCount:SetPoint("CENTER", host, "CENTER", 0, 0)
+                    nativeCount:SetPoint("CENTER", frame, "CENTER", 0, 0)
                     nativeCount:SetTextColor(1, 1, 1)
                     frame:SetApplicationCount(nativeCount, { formatter = MakeCountFormatter() })
                 end
@@ -810,12 +818,16 @@ local function BuildNativeLayer()
         if nativeHost then nativeHost:Hide() end
         nativeHost, nativeLayer = nil, nil
         nativeUnavailable = true
+        -- l'echec etait silencieux : le montrer une fois pour le diagnostic
+        local msg = tostring(err):gsub("\n.*", "")
+        if #msg > 200 then msg = msg:sub(1, 200) .. "..." end
+        print(PREFIX .. "couche native indisponible : " .. msg)
     end
 end
 
--- A appeler quand les couleurs ou le compteur changent : reconstruit la
--- couche native hors combat, sinon juste apres la fin du combat.
-local function NativeChanged()
+-- A appeler quand les couleurs, le compteur ou la taille changent :
+-- reconstruit la couche native hors combat, sinon juste apres le combat.
+NativeChanged = function()
     if nativeUnavailable then return end
     if InCombatLockdown() then nativeDirty = true; return end
     if nativeHost then nativeHost:Hide() end -- l'ancienne couche est abandonnee
@@ -2046,6 +2058,26 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
                 end
             end
         end
+    elseif cmd == "native" then
+        -- /mw native : etat de la couche native (affichage en combat pilote
+        -- par le moteur du client, secret ou pas) ; "retry" reessaie.
+        if arg == "retry" or arg == "reessayer" then
+            nativeUnavailable = nil
+            if nativeHost then nativeHost:Hide() end
+            nativeHost, nativeLayer = nil, nil
+            BuildNativeLayer()
+        end
+        if nativeLayer then
+            print(PREFIX .. "couche native : construite, le slot Maelstrom est pilote par le moteur")
+        elseif nativeUnavailable then
+            print(PREFIX .. "couche native : indisponible (repli Cooldown Manager), /mw native retry pour reessayer")
+        elseif InCombatLockdown() then
+            print(PREFIX .. "couche native : non construite, en combat (elle se construit hors combat)")
+        else
+            print(PREFIX .. "couche native : non construite"
+                .. (nativeDirty and " (reconstruction a la fin du combat)" or ""))
+        end
+        Update()
     elseif cmd == "cleu" then
         -- /mw cleu : statut du journal de combat sur ce client (reserve a
         -- l'UI Blizzard ici) + trace si jamais des evenements arrivent.
