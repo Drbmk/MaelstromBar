@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 16 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 17 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -1761,15 +1761,16 @@ ev:SetScript("OnEvent", function(self, event, unit, ...)
         playerGUID = (UnitGUID and UnitGUID("player")) or playerGUID
         cleuEvents = cleuEvents or {}
         -- journal de combat : repli de lecture en combat (voir OnCombatLog).
-        -- COMBAT_LOG_EVENT_UNFILTERED est le nom standard cote addons ;
-        -- COMBAT_LOG_EVENT (ancien nom) n'est tente que via /mw cleu pour ne
-        -- pas declencher de popup "action reservee a l'UI Blizzard" au login
-        -- si le client le protege. Statut visible via /mw cleu.
-        for _, ev in ipairs({ "COMBAT_LOG_EVENT_UNFILTERED" }) do
-            local ok, err = pcall(self.RegisterEvent, self, ev)
-            cleuEvents[ev] = ok and "enregistre" or tostring(err)
+        -- ATTENTION : ce client reserve l'acces au journal a l'UI Blizzard :
+        -- l'enregistrement de l'evenement declenche le popup "action reservee
+        -- a l'UI Blizzard", et CombatLogGetCurrentEventInfo n'y existe pas.
+        -- On n'enregistre donc que si l'API de lecture existe (clients standards).
+        if CombatLogGetCurrentEventInfo then
+            local ok, err = pcall(self.RegisterEvent, self, "COMBAT_LOG_EVENT_UNFILTERED")
+            cleuEvents["COMBAT_LOG_EVENT_UNFILTERED"] = ok and "enregistre" or tostring(err)
+        else
+            cleuEvents["COMBAT_LOG_EVENT_UNFILTERED"] = "reserve a l'UI Blizzard sur ce client"
         end
-        cleuEvents["COMBAT_LOG_EVENT"] = "non tente (voire /mw cleu)"
 
         -- Integration au menu d'edition de l'interface (clients qui l'ont)
         if EditModeManagerFrame and EditModeManagerFrame.HookScript then
@@ -1824,16 +1825,51 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         print(PREFIX .. (unlocked and T("unlocked (drag the bar)") or T("locked")))
     elseif cmd == "setup" then
         SetupCooldownManager(true)
-    elseif cmd == "cleu" then
-        -- /mw cleu : tracer 20 s le journal de combat (diagnostic du repli).
-        -- /mw cleu all : tenter aussi l'ancien nom COMBAT_LOG_EVENT (s'il est
-        -- protege, le popup Blizzard apparait maintenant et on saura que
-        -- c'est lui le responsable).
-        if arg == "all" or arg == "tout" then
-            local ok, err = pcall(ev.RegisterEvent, ev, "COMBAT_LOG_EVENT")
-            cleuEvents = cleuEvents or {}
-            cleuEvents["COMBAT_LOG_EVENT"] = ok and "enregistre" or tostring(err)
+    elseif cmd == "cdminfo" then
+        -- /mw cdminfo : champs du descriptif du cooldown Maelstrom dans le
+        -- Cooldown Manager. A lancer EN COMBAT, buff actif : cherche un champ
+        -- de stacks lisible, ou au moins secret (une valeur secrete reste
+        -- affichable par StatusBar:SetValue, comme le fait l'icone du CDM).
+        local C = C_CooldownViewer
+        if not (C and C.GetCooldownViewerCooldownInfo) then
+            print(PREFIX .. "C_CooldownViewer indisponible")
+        else
+            local id = FindMaelstromCooldownID()
+            if not id then
+                print(PREFIX .. "cooldownID Maelstrom introuvable au catalogue")
+            else
+                print(PREFIX .. "cooldownID " .. tostring(id)
+                    .. (InCombatLockdown() and " | en combat" or " | hors combat"))
+                local okI, info = pcall(C.GetCooldownViewerCooldownInfo, id)
+                if not okI or type(info) ~= "table" then
+                    print(PREFIX .. "GetCooldownViewerCooldownInfo : " .. tostring(info))
+                else
+                    local keys = {}
+                    for k in pairs(info) do keys[#keys + 1] = tostring(k) end
+                    table.sort(keys)
+                    for _, k in ipairs(keys) do
+                        local v = info[k]
+                        local tv = type(v)
+                        local shown
+                        if issecretvalue and issecretvalue(v) then
+                            shown = "<secret>"
+                        elseif tv == "table" then
+                            local n = 0
+                            for _ in pairs(v) do n = n + 1 end
+                            shown = "table(" .. n .. ")"
+                        elseif tv == "string" and #v > 40 then
+                            shown = "string: " .. v:sub(1, 40) .. "..."
+                        else
+                            shown = tv .. ": " .. tostring(v)
+                        end
+                        print(PREFIX .. "  " .. k .. " = " .. shown)
+                    end
+                end
+            end
         end
+    elseif cmd == "cleu" then
+        -- /mw cleu : statut du journal de combat sur ce client (reserve a
+        -- l'UI Blizzard ici) + trace si jamais des evenements arrivent.
         if type(cleuEvents) == "table" then
             for ev, st in pairs(cleuEvents) do print(PREFIX .. ev .. " : " .. tostring(st)) end
         else
