@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 24 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 25 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -37,6 +37,10 @@ if GetLocale() == "frFR" then
         ["Bar background"] = "Fond de la barre",
         ["Show the stack count on the bar (/mw count)"] = "Afficher le nombre de stacks sur la barre (/mw count)",
         ["count "] = "compteur ",
+        ["count position: "] = "position du compteur : ",
+        ["count position: above, center or below (/mw count pos ...)"] = "position du compteur : au-dessus, au centre ou en dessous (/mw count pos …)",
+        ["count offset: "] = "décalage du compteur : ",
+        ["count offset: /mw count offset x y (pixels)"] = "décalage : /mw count offset x y (pixels)",
         ["warning "] = "avertissement ",
         ["Show the Cooldown Manager warning (red text under the bar, /mw warn)"] = "Afficher l'avertissement du Gestionnaire de temps de recharge (texte rouge sous la barre, /mw warn)",
         ["on"] = "activé",
@@ -683,11 +687,26 @@ warn:SetTextColor(1, 0.25, 0.2)
 warn:SetText(T("Maelstrom Weapon is not tracked in the Cooldown Manager.\nThe bar stays empty in combat.  /mw setup"))
 warn:Hide()
 
--- Compteur de stacks (option /mw count) : au centre de la barre
+-- Compteur de stacks (option /mw count) : au-dessus (defaut), au centre ou
+-- en dessous de la barre ; position et decalage reglables (/mw count pos,
+-- /mw count offset). La meme ancre sert au compteur natif (combat).
 local count = bar:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-count:SetPoint("CENTER", bar, "CENTER", 0, 0)
 count:SetTextColor(1, 1, 1)
 count:Hide()
+local function CountAnchor()
+    local pos = db and db.countPos or "top"
+    local x = db and db.countX or 0
+    local y = db and db.countY or 0
+    if pos == "center" then return "CENTER", "CENTER", x, y end
+    if pos == "bottom" then return "TOP", "BOTTOM", x, y - 4 end
+    return "BOTTOM", "TOP", x, y + 4
+end
+local function ApplyCountPos()
+    local p, rp, x, y = CountAnchor()
+    count:ClearAllPoints()
+    count:SetPoint(p, bar, rp, x, y)
+end
+ApplyCountPos()
 
 overlay:SetScript("OnDragStart", function() bar:StartMoving() end)
 overlay:SetScript("OnDragStop", function()
@@ -797,9 +816,11 @@ local function BuildNativeLayer()
                     frame:SetApplicationBar(s, { minApplications = lo, maxApplications = hi })
                     fills[#fills + 1] = { bar = s, label = key .. " (min=" .. lo .. ", max=" .. hi .. ")" }
                     if withCount and db.showCount then
-                        -- compteur natif : le moteur ecrit le nombre lui-meme
+                        -- compteur natif : le moteur ecrit le nombre lui-meme,
+                        -- a la meme position que notre compteur
                         nativeCount = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-                        nativeCount:SetPoint("CENTER", host, "CENTER", 0, 0)
+                        local p, rp, cx, cy = CountAnchor()
+                        nativeCount:SetPoint(p, host, rp, cx, cy)
                         nativeCount:SetTextColor(1, 1, 1)
                         frame:SetApplicationCount(nativeCount, { formatter = MakeCountFormatter() })
                     end
@@ -2125,11 +2146,38 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         Update()
         print(PREFIX .. T("always show ") .. (db.alwaysShow and T("on") or T("off")))
     elseif cmd == "count" or cmd == "compteur" then
-        -- /mw count : compteur de stacks au centre de la barre
-        db.showCount = not db.showCount
-        NativeChanged()
-        Update()
-        print(PREFIX .. T("count ") .. (db.showCount and T("on") or T("off")))
+        -- /mw count : compteur de stacks. Variantes de position :
+        -- /mw count pos above|center|below, /mw count offset <x> <y>
+        local what, rest = arg:match("^(%S*)%s*(.-)$")
+        if what == "pos" or what == "position" then
+            local p = rest:match("^(%S+)")
+            local pos
+            if p == "center" or p == "centre" then pos = "center"
+            elseif p == "below" or p == "dessous" then pos = "bottom"
+            elseif p == "above" or p == "dessus" or p == "au-dessus" then pos = "top" end
+            if pos then
+                db.countPos = pos
+                ApplyCountPos(); NativeChanged(); Update()
+                print(PREFIX .. T("count position: ") .. pos)
+            else
+                print(PREFIX .. T("count position: above, center or below (/mw count pos ...)"))
+            end
+        elseif what == "offset" or what == "decalage" then
+            local x, y = rest:match("^([-%d]+)%s+([-%d]+)")
+            x, y = tonumber(x), tonumber(y)
+            if x and y and math.abs(x) <= 200 and math.abs(y) <= 100 then
+                db.countX, db.countY = x, y
+                ApplyCountPos(); NativeChanged(); Update()
+                print(PREFIX .. T("count offset: ") .. x .. ", " .. y)
+            else
+                print(PREFIX .. T("count offset: /mw count offset x y (pixels)"))
+            end
+        else
+            db.showCount = not db.showCount
+            NativeChanged()
+            Update()
+            print(PREFIX .. T("count ") .. (db.showCount and T("on") or T("off")))
+        end
     elseif cmd == "lock" then
         SetUnlocked(false)
         print(PREFIX .. T("locked"))
