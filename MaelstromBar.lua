@@ -1,10 +1,10 @@
 -- MaelstromBar by Petitcorps : Maelstrom Weapon stack bar (Retail style), standalone.
--- Commands: /mw options | move | lock | always | warn | count | color | glow | glowspell | glowframe | glowscan | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <name> | setup | log | testerror | debug
+-- Commands: /mw options | move | lock | always | count | color | glow | glowspell | glowframe | glowscan | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <name> | setup | log | testerror | debug
 
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 23 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 24 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -83,6 +83,13 @@ if GetLocale() == "frFR" then
         ["Maelstrom Weapon is not tracked in the Cooldown Manager: the bar stays empty in combat."] = "Arme du Maelström n'est pas suivie dans le Cooldown Manager : la barre reste vide en combat.",
         ["Fix: press Open the Cooldown Manager settings below, then add Maelstrom Weapon to the tracked buffs by hand, in the Enhancements section of the window that opens (an addon cannot change that list). Press Check again afterwards."] = "Correction : appuie sur « Ouvrir les réglages du Cooldown Manager » ci-dessous, puis ajoute Arme du Maelström aux buffs suivis à la main, dans la section « Améliorations » de la fenêtre qui s'ouvre (un addon ne peut pas modifier cette liste). Appuie ensuite sur « Vérifier à nouveau ».",
         ["cannot click that in combat, retry out of combat"] = "clic impossible en combat, réessaie hors combat",
+        ["in combat the game engine itself displays the stacks: everything is fine."] = "en combat, le moteur du jeu affiche lui-même les stacks : tout va bien.",
+        ["this client does not let the addon display the stacks in combat."] = "ce client ne permet pas à l'addon d'afficher les stacks en combat.",
+        ["the combat display is built out of combat; try again after combat."] = "l'affichage de combat se construit hors combat ; réessaie après le combat.",
+        ["the combat display is not built yet; type /mw native for details."] = "l'affichage de combat n'est pas encore construit ; tape /mw native pour les détails.",
+        ["In combat"] = "En combat",
+        ["The stacks are displayed in combat by the game engine itself: no configuration is needed."] = "En combat, les stacks sont affichées par le moteur du jeu lui-même : aucune configuration n'est nécessaire.",
+        ["The combat display is built out of combat; it will be ready for the next fight."] = "L'affichage de combat se construit hors combat ; il sera prêt pour le prochain combat.",
         ["Open the Cooldown Manager settings"] = "Ouvrir les réglages du Cooldown Manager",
         ["Cooldown Manager settings not found: open the game options and look for them"] = "réglages du Cooldown Manager introuvables : ouvre les options du jeu et cherche-les",
         ["The Cooldown Manager cannot be checked in combat; reopen this panel out of combat."] = "Le Cooldown Manager ne peut pas être vérifié en combat ; rouvre ce panneau hors combat.",
@@ -100,7 +107,6 @@ local function T(s) return ((LOC[s] or s):gsub("Cooldown Manager", CDM_NAME)) en
 local DEFAULTS = {
     point = "CENTER", relPoint = "CENTER", x = 0, y = -150,
     scale = 1, auraName = nil, alwaysShow = false,
-    warnCDM = true,                     -- texte rouge si le buff n'est pas suivi
     sqW = SQ_W, sqH = SQ_H, sqGap = SQ_GAP,
     colorNormal = { 0, 0.55, 1 },
     colorFull = { 0.55, 0.95, 1 },
@@ -522,9 +528,10 @@ local function SetupCooldownManager(verbose)
 end
 
 local function ReadStacks()
-    viaCDM = false
     -- Lecture directe par ID (la plus fiable). "applications" peut etre une valeur
     -- secrete (liste blanche Blizzard) : on la renvoie telle quelle, la StatusBar l'accepte.
+    -- En combat, ce client interdit toute lecture aux addons (valeurs secretes) :
+    -- la lecture echoue alors proprement et l'affichage passe par la couche native.
     if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
         for id in pairs(SPELL_IDS) do
             local okA, a = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
@@ -535,13 +542,6 @@ local function ReadStacks()
                 return c
             end
         end
-    end
-    if AurasSecret() then
-        viaCDM = true -- en combat : Cooldown Manager d'abord, journal de combat en repli
-        local v = ReadFromCooldownManager()
-        if v ~= nil then return v end
-        if cleuStacks ~= nil then return cleuStacks end
-        return 0
     end
     if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
         -- pcall : le balayage peut etre refuse (taint / valeurs secretes)
@@ -583,8 +583,6 @@ local function GetStacks()
     local ok, res = pcall(ReadStacks)
     if ok then
         if issecretvalue and issecretvalue(res) then return res end
-        -- nombre simple : resynchronise le decompte du journal de combat
-        if type(res) == "number" then cleuStacks, cleuTime = res, time() end
         return res or 0
     end
     if res ~= lastErr then
@@ -741,6 +739,8 @@ local nativeHost        -- frame hote : son alpha pilote la visibilite de la cou
 local nativeLayer       -- couche construite : { host, fills, count }
 local nativeUnavailable -- ce client n'expose pas l'API : repli Cooldown Manager
 local nativeDirty       -- reconstruction demandee (attend la fin du combat)
+local glowDirty = true               -- declare ici : utilise aussi par NativeChanged (halos)
+local ClearGlowNatives               -- defini dans la section halo (pilotes natifs des halos)
 
 -- Formateur du compteur natif : nombre entier (mecanique du jeu).
 local function MakeCountFormatter()
@@ -759,6 +759,7 @@ local function MakeCountFormatter()
 end
 
 local nativeVariant = "squares" -- "squares" : nos carres | "ladder" : diagnostic
+local NATIVE_IDS = { [408505] = true, [408498] = true, [53817] = true, [344179] = true }
 
 local function BuildNativeLayer()
     if nativeLayer or nativeUnavailable or not db then return end
@@ -771,7 +772,6 @@ local function BuildNativeLayer()
         local container = CreateFrame("AuraContainer", nil, host, "CustomAuraContainerTemplate")
         container:SetUnit("player")
         local fills, nativeCount = {}, nil
-        local IDS = { [408505] = true, [408498] = true, [53817] = true, [344179] = true }
         local w = db.sqW or SQ_W
         local h = db.sqH or SQ_H
         local gap = db.sqGap or SQ_GAP
@@ -779,14 +779,14 @@ local function BuildNativeLayer()
         -- un slot dedie : son frame couvre la zone donnee, une seule barre
         -- (les setters du moteur semblent singuliers par slot), pilotee par
         -- le moteur avec la semantique minApplications/maxApplications
-        local function MakeSlot(key, lo, hi, c, x1, y1, x2, y2, withCount)
+        local function MakeSlot(key, lo, hi, c, x1, y1, x2, y2, withCount, level)
             local slot = container:AddAuraSlot(key, "HELPFUL", {
-                candidateFilters = { includeSpellIDs = IDS },
+                candidateFilters = { includeSpellIDs = NATIVE_IDS },
                 initializeFrame = function(frame)
                     frame:ClearAllPoints()
                     frame:SetPoint("TOPLEFT", host, "TOPLEFT", x1, y1)
                     frame:SetPoint("BOTTOMRIGHT", host, "TOPLEFT", x2, y2)
-                    frame:SetFrameLevel(host:GetFrameLevel() + 1)
+                    frame:SetFrameLevel(host:GetFrameLevel() + (level or 1))
                     pcall(frame.SetMouseClickEnabled, frame, false)
                     pcall(frame.EnableMouseMotion, frame, false)
                     local s = CreateFrame("StatusBar", nil, frame)
@@ -832,9 +832,11 @@ local function BuildNativeLayer()
             for i = 1, MAX_STACKS do
                 local x = (i - 1) * (w + gap)
                 -- inset de 2 px comme nos propres remplissages : le contour
-                -- (liseré + fond) du carre reste visible autour du remplissage
-                MakeSlot("mwsq" .. i, i - 1, i, cn, x + 2, -2, x + w - 2, -(h - 2), i == 1)
-                MakeSlot("mwfull" .. i, MAX_STACKS - 1, MAX_STACKS, cf, x + 2, -2, x + w - 2, -(h - 2))
+                -- (liseré + fond) du carre reste visible autour du remplissage.
+                -- La barre "plein" est a un niveau de frame superieur : elle
+                -- recouvre le remplissage normal a 5 stacks (couleur maximum)
+                MakeSlot("mwsq" .. i, i - 1, i, cn, x + 2, -2, x + w - 2, -(h - 2), i == 1, 1)
+                MakeSlot("mwfull" .. i, MAX_STACKS - 1, MAX_STACKS, cf, x + 2, -2, x + w - 2, -(h - 2), false, 3)
             end
         end
         nativeHost, nativeLayer = host, { host = host, fills = fills, count = nativeCount }
@@ -858,10 +860,13 @@ NativeChanged = function()
     if nativeHost then nativeHost:Hide() end -- l'ancienne couche est abandonnee
     nativeHost, nativeLayer = nil, nil
     BuildNativeLayer()
+    -- les pilotes natifs des halos portent la couleur du halo : les refaire
+    if ClearGlowNatives then ClearGlowNatives() end
+    glowDirty = true
 end
 
 ---------------------------------------------------------------- halo sur la barre d'action
-local glowDirty = true
+-- glowDirty est declare plus haut (section couche native)
 local glowTargets = {}   -- noms (minuscules) et IDs a surligner
 local glowFrames = {}    -- frame de halo par bouton
 local glowActive = {}    -- boutons actuellement surlignes
@@ -1091,14 +1096,79 @@ local function HideGlows()
     end
 end
 
+-- Pilote natif des halos : en combat, le moteur du client remplit aussi les
+-- couches du halo (un slot par couche, barre visible a 5 stacks, min=max).
+-- La creation n'est possible que hors combat ; un halo apparu en combat
+-- recoit son pilote a la fin du combat (glowNativePending).
+local glowNatives = {}  -- par bouton : frame hote du pilote (false : echec)
+local glowNativePending -- true : des halos attendent leur pilote
+
+ClearGlowNatives = function()
+    for btn, host in pairs(glowNatives) do
+        if host then host:Hide() end
+        glowNatives[btn] = nil
+    end
+end
+
+local function AttachGlowNative(btn, g)
+    if glowNatives[btn] ~= nil then return end
+    if nativeUnavailable then glowNatives[btn] = false; return end
+    if InCombatLockdown() then glowNativePending = true; return end
+    local ok = pcall(function()
+        local w = btn:GetWidth(); if not w or w < 10 then w = 36 end
+        local h = btn:GetHeight(); if not h or h < 10 then h = 36 end
+        local host = CreateFrame("Frame", nil, g)
+        host:SetAllPoints(g)
+        host:SetFrameLevel(g:GetFrameLevel() + 1)
+        host:SetAlpha(0) -- visible en combat seulement (bascule par RefreshGlow)
+        local container = CreateFrame("AuraContainer", nil, host, "CustomAuraContainerTemplate")
+        container:SetUnit("player")
+        local c = db.colorGlow or DEFAULTS.colorGlow
+        local layers = {
+            { "Interface\\Buttons\\UI-ActionButton-Border", w * 2.1, h * 2.1, 1 },
+            { "Interface\\Buttons\\UI-ActionButton-Border", w * 1.8, h * 1.8, 1 },
+            { "Interface\\Buttons\\WHITE8X8", w, h, 0.4 },
+        }
+        for li, L in ipairs(layers) do
+            local slot = container:AddAuraSlot("mwglow" .. li, "HELPFUL", {
+                candidateFilters = { includeSpellIDs = NATIVE_IDS },
+                initializeFrame = function(frame)
+                    frame:ClearAllPoints()
+                    frame:SetSize(L[2], L[3])
+                    frame:SetPoint("CENTER", g, "CENTER", 0, 0)
+                    frame:SetFrameLevel(host:GetFrameLevel() + 1)
+                    pcall(frame.SetMouseClickEnabled, frame, false)
+                    pcall(frame.EnableMouseMotion, frame, false)
+                    local s = CreateFrame("StatusBar", nil, frame)
+                    s:SetAllPoints(frame)
+                    s:SetStatusBarTexture(L[1])
+                    local t = s:GetStatusBarTexture()
+                    if t and t.SetBlendMode then t:SetBlendMode("ADD") end
+                    s:SetAlpha(L[4])
+                    s:SetStatusBarColor(c[1], c[2], c[3], 1)
+                    -- le moteur rend la couche visible a 5 stacks (min=max,
+                    -- meme mecanisme que l'indicateur "pret" de l'UI du jeu)
+                    frame:SetApplicationBar(s, { minApplications = MAX_STACKS, maxApplications = MAX_STACKS })
+                end,
+            })
+            if not slot then error("glow slot unavailable") end
+        end
+        glowNatives[btn] = host
+    end)
+    if not ok then glowNatives[btn] = false end
+end
+
 local lastWant = false
 local function RefreshGlow(stacks)
     -- Les halos restent poses sur les boutons tant que l'option est active ;
-    -- c'est la valeur des StatusBar qui les rend visibles a 5 stacks.
+    -- c'est la valeur des StatusBar qui les rend visibles a 5 stacks. En
+    -- combat, la valeur vient du pilote natif (moteur du client) : nos
+    -- couches y restent vides et le pilote prend le relais visuellement.
     local want = db.glow and true or false
     if want ~= lastWant or glowDirty then
         lastWant, glowDirty = want, false
         HideGlows()
+        ClearGlowNatives() -- boutons ou couleurs changes : pilotes obsoletes
         if want then
             local c = db.colorGlow
             for _, btn in ipairs(CollectGlowButtons()) do
@@ -1109,11 +1179,15 @@ local function RefreshGlow(stacks)
                 g:Show()
                 g.ag:Play()
                 glowActive[btn] = true
+                AttachGlowNative(btn, g)
             end
         end
     end
+    local combat = UnitAffectingCombat("player")
     for btn in pairs(glowActive) do
         local g = glowFrames[btn]
+        local host = glowNatives[btn]
+        if host then host:SetAlpha(combat and 1 or 0) end
         g.border:SetValue(stacks)
         g.border2:SetValue(stacks)
         g.fill:SetValue(stacks)
@@ -1145,29 +1219,10 @@ local function Update()
     -- en mode test ou en mode edition, le fonctionnement habituel reprend.
     local nativeActive = nativeLayer and inCombat and not testStacks and not unlocked
 
-    -- Diagnostique en combat : si la lecture des stacks depend du Cooldown
-    -- Manager et echoue, expliquer pourquoi (une fois par combat, 10 s de
-    -- marge) plutot qu'une barre muette a 0. Respecte /mw warn. Inutile
-    -- quand la couche native pilote l'affichage.
-    if inCombat and viaCDM and db.warnCDM and not combatHintDone and not nativeLayer then
-        local now = time()
-        -- le journal de combat recent suffit a lire les stacks : pas d'alerte
-        local cleuOk = cleuStacks ~= nil and (now - (cleuTime or 0)) < 15
-        if not cleuOk and now - (cdmItemLastSeen or 0) > 10 then
-            combatHintDone = true
-            print(PREFIX .. T("in combat: Maelstrom Weapon is not in the Cooldown Manager, the stacks cannot be read. After combat, type /mw setup."))
-        elseif not cleuOk and not cdmValueEverRead and cdmItemLastSeen and now - cdmItemLastSeen <= 2 then
-            combatHintDone = true
-            print(PREFIX .. T("in combat: the Maelstrom Weapon icon of the Cooldown Manager was found but its stacks could not be read; please report this with /mw log."))
-        end
-    end
-
     -- Valeur secrete : aucune comparaison possible (barre toujours visible)
     RefreshGlow(stacks)
 
-    local showWarn = cdmMissing and db.warnCDM and not nativeLayer and true or false
-    if showWarn then warn:Show() else warn:Hide() end
-    if unlocked or db.alwaysShow or inCombat or secret or showWarn or stacks > 0 then
+    if unlocked or db.alwaysShow or inCombat or secret or stacks > 0 then
         bar:Show()
     else
         bar:Hide()
@@ -1175,14 +1230,12 @@ local function Update()
     end
 
     -- Compteur optionnel : une valeur secrete ne peut pas devenir du texte ;
-    -- en combat la couche native fournit son propre compteur (moteur), hors
-    -- combat le decompte du journal de combat sert de repli
+    -- en combat la couche native fournit son propre compteur (moteur)
     if db.showCount then
         if nativeActive then
             count:Hide()
         else
             local n = stacks
-            if issecretvalue and issecretvalue(n) then n = cleuStacks end
             if type(n) == "number" and n > 0 then
                 count:SetText(tostring(n))
                 count:Show()
@@ -1679,81 +1732,32 @@ local function BuildOptions()
 
     Label(T("MaelstromBar  (command: /mw)"), "GameFontNormalLarge"); y = y - 32
 
-    -- Cooldown Manager : guider l'utilisateur. L'addon active le Cooldown
-    -- Manager lui-meme (bouton « Check again », comme au login), mais le suivi
-    -- du buff doit etre coche a la main dans les options du jeu : le panneau
-    -- affiche l'etat et la marche a suivre.
-    if C_Secrets and C_Secrets.ShouldAurasBeSecret then
-        Label(T("Cooldown Manager (stacks in combat)"), "GameFontNormal", 16, y); y = y - 22
+    -- Affichage en combat : sur ce client, les auras du joueur sont secretes
+    -- en combat et seul le moteur du jeu peut les afficher. Le panneau montre
+    -- si la couche native est active (elle se construit hors combat).
+    do
+        Label(T("In combat"), "GameFontNormal", 16, y); y = y - 22
         local st = Label("", "GameFontHighlight", 16, y)
-        local fix = Label("", "GameFontHighlight", 16, y - 20)
-        fix:SetWidth(540)
-        local function RefreshCDMPanel()
-            local getCV = (C_CVar and C_CVar.GetCVar) or GetCVar
-            local okG, enabled = pcall(getCV, "cooldownViewerEnabled")
-            local s
-            if InCombatLockdown and InCombatLockdown() then
-                s = "combat"
-            elseif okG and enabled == "0" then
-                s = "disabled"
-            elseif not CooldownViewerExists() then
-                s = "pending"
-            elseif HasMaelstromItem() then
-                s = "tracked"
-            else
-                local active = MaelstromBuffActive()
-                if active == nil or not active then
-                    -- sans stacks actives, l'icone peut ne pas exister (UI
-                    -- manette) : le catalogue ou l'exclusion de l'UI manette
-                    -- tranche quand c'est possible
-                    local cat = CatalogTrackedState()
-                    if cat == false or IconAbsenceIsProof() then s = "missing"
-                    elseif cat == true then s = "tracked"
-                    else s = "unknown" end
-                else
-                    s = "missing"
-                end
-            end
-            if s == "tracked" then
-                st:SetText(T("Maelstrom Weapon is tracked in the Cooldown Manager: the bar works in combat."))
+        local function RefreshCombatPanel()
+            if nativeLayer then
+                st:SetText(T("The stacks are displayed in combat by the game engine itself: no configuration is needed."))
                 st:SetTextColor(0.35, 1, 0.35)
-                fix:SetText("")
-            elseif s == "missing" then
-                st:SetText(T("Maelstrom Weapon is not tracked in the Cooldown Manager: the bar stays empty in combat."))
-                st:SetTextColor(1, 0.3, 0.25)
-                fix:SetText(T("Fix: press Open the Cooldown Manager settings below, then add Maelstrom Weapon to the tracked buffs by hand, in the Enhancements section of the window that opens (an addon cannot change that list). Press Check again afterwards."))
-            elseif s == "disabled" then
-                st:SetText(T("The Cooldown Manager is disabled: the stacks cannot be read in combat. Press Check again to enable it."))
+            elseif nativeUnavailable then
+                st:SetText(T("this client does not let the addon display the stacks in combat."))
                 st:SetTextColor(1, 0.55, 0.2)
-                fix:SetText("")
-            elseif s == "combat" then
-                st:SetText(T("The Cooldown Manager cannot be checked in combat; reopen this panel out of combat."))
-                st:SetTextColor(1, 0.8, 0.2)
-                fix:SetText("")
             else
-                st:SetText(T("Cannot confirm yet: no Maelstrom stacks active, or the Cooldown Manager is still loading. If the stacks cannot be read in combat, a message in chat will say so."))
+                st:SetText(T("The combat display is built out of combat; it will be ready for the next fight."))
                 st:SetTextColor(1, 0.8, 0.2)
-                fix:SetText("")
             end
         end
-        refreshers[#refreshers + 1] = RefreshCDMPanel
-        Button(T("Check again"), 130, 16, y - 70, function()
-            -- active le Cooldown Manager si besoin, verifie le suivi et
-            -- detaille la marche a suivre dans le chat (meme chemin que /mw setup)
-            SetupCooldownManager(true)
-            RefreshCDMPanel()
-            if C_Timer and C_Timer.After then C_Timer.After(1.5, RefreshCDMPanel) end
-        end)
-        Button(T("Open the Cooldown Manager settings"), 300, 156, y - 70, OpenCDMSettings)
-        y = y - 100
+        refreshers[#refreshers + 1] = RefreshCombatPanel
+        y = y - 30
     end
 
     Check(T("Unlock the bar to move it (/mw move)"),
         function() return unlocked end, function(v) SetUnlocked(v) end)
     Check(T("Always show the bar (/mw always)"),
         function() return db.alwaysShow end, function(v) db.alwaysShow = v; Update() end)
-    Check(T("Show the Cooldown Manager warning (red text under the bar, /mw warn)"),
-        function() return db.warnCDM end, function(v) db.warnCDM = v; Update() end)
     Check(T("Show the stack count on the bar (/mw count)"),
         function() return db.showCount end, function(v) db.showCount = v; NativeChanged(); Update() end)
 
@@ -1924,19 +1928,6 @@ ev:SetScript("OnEvent", function(self, event, unit, ...)
         self:RegisterEvent("PLAYER_REGEN_DISABLED")
         self:RegisterEvent("PLAYER_REGEN_ENABLED")
         self:RegisterEvent("PLAYER_ENTERING_WORLD")
-        playerGUID = (UnitGUID and UnitGUID("player")) or playerGUID
-        cleuEvents = cleuEvents or {}
-        -- journal de combat : repli de lecture en combat (voir OnCombatLog).
-        -- ATTENTION : ce client reserve l'acces au journal a l'UI Blizzard :
-        -- l'enregistrement de l'evenement declenche le popup "action reservee
-        -- a l'UI Blizzard", et CombatLogGetCurrentEventInfo n'y existe pas.
-        -- On n'enregistre donc que si l'API de lecture existe (clients standards).
-        if CombatLogGetCurrentEventInfo then
-            local ok, err = pcall(self.RegisterEvent, self, "COMBAT_LOG_EVENT_UNFILTERED")
-            cleuEvents["COMBAT_LOG_EVENT_UNFILTERED"] = ok and "enregistre" or tostring(err)
-        else
-            cleuEvents["COMBAT_LOG_EVENT_UNFILTERED"] = "reserve a l'UI Blizzard sur ce client"
-        end
 
         -- Integration au menu d'edition de l'interface (clients qui l'ont)
         if EditModeManagerFrame and EditModeManagerFrame.HookScript then
@@ -1945,40 +1936,20 @@ ev:SetScript("OnEvent", function(self, event, unit, ...)
         end
         Update()
         StartRealtimeUpdates()
-        -- laisse le temps au Cooldown Manager de creer ses frames et ses icones
-        -- avant de verifier ; avec l'UI manette elles apparaissent tard, d'ou la
-        -- periode de grace (~60 s) pendant laquelle on reessaie sans prevenir
-        if C_Timer and C_Timer.After then
-            C_Timer.After(5, function()
-                setupDone = true
-                cdmGraceLeft = CDM_GRACE_RETRIES
-                pcall(SetupCooldownManager, false)
-            end)
-        end
-    elseif event == "COMBAT_LOG_EVENT_UNFILTERED" or event == "COMBAT_LOG_EVENT" then
-        -- comptage brut ici : meme si OnCombatLog rend la main aussitot
-        -- (CombatLogGetCurrentEventInfo absent...), la trace doit le montrer
-        if cleuTraceUntil and time() < cleuTraceUntil then
-            cleuTraceCount = cleuTraceCount + 1
-            cleuTraceLast = event
-        end
-        OnCombatLog()
     elseif event == "UNIT_AURA" then
         if unit == "player" then Update() end
     else
-        if event == "PLAYER_REGEN_DISABLED" then
-            -- entree en combat : reinitialiser le diagnostique (10 s de marge
-            -- avant le message, le temps que les premieres stacks arrivent)
-            combatHintDone = false
-            cdmItemLastSeen = time()
-        end
         if event == "PLAYER_REGEN_ENABLED" then
-            -- couleurs ou compteur changes en combat : reconstruire maintenant
+            -- couleurs, compteur ou halos changes en combat : reconstruire
             if nativeDirty then
                 nativeDirty = false
                 NativeChanged()
             end
-            if setupDone then RefreshCDMWarning() end
+            if glowNativePending then
+                -- halos crees en combat : leurs slots natifs attendaient
+                glowNativePending = false
+                glowDirty = true
+            end
         end
         glowDirty = true -- barres d'action modifiees : relire les boutons
         Update()
@@ -1997,91 +1968,15 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         SetUnlocked(not unlocked)
         print(PREFIX .. (unlocked and T("unlocked (drag the bar)") or T("locked")))
     elseif cmd == "setup" then
-        SetupCooldownManager(true)
-    elseif cmd == "cdminfo" then
-        -- /mw cdminfo : champs du descriptif du cooldown Maelstrom dans le
-        -- Cooldown Manager. A lancer EN COMBAT, buff actif : cherche un champ
-        -- de stacks lisible, ou au moins secret (une valeur secrete reste
-        -- affichable par StatusBar:SetValue, comme le fait l'icone du CDM).
-        local C = C_CooldownViewer
-        if not (C and C.GetCooldownViewerCooldownInfo) then
-            print(PREFIX .. "C_CooldownViewer indisponible")
+        -- /mw setup : etat de l'affichage en combat (couche native du client)
+        if nativeLayer then
+            print(PREFIX .. T("in combat the game engine itself displays the stacks: everything is fine."))
+        elseif nativeUnavailable then
+            print(PREFIX .. T("this client does not let the addon display the stacks in combat."))
+        elseif InCombatLockdown() then
+            print(PREFIX .. T("the combat display is built out of combat; try again after combat."))
         else
-            local id = FindMaelstromCooldownID()
-            if not id then
-                print(PREFIX .. "cooldownID Maelstrom introuvable au catalogue")
-            else
-                print(PREFIX .. "cooldownID " .. tostring(id)
-                    .. (InCombatLockdown() and " | en combat" or " | hors combat"))
-                local okI, info = pcall(C.GetCooldownViewerCooldownInfo, id)
-                if not okI or type(info) ~= "table" then
-                    print(PREFIX .. "GetCooldownViewerCooldownInfo : " .. tostring(info))
-                else
-                    local keys = {}
-                    for k in pairs(info) do keys[#keys + 1] = tostring(k) end
-                    table.sort(keys)
-                    for _, k in ipairs(keys) do
-                        local v = info[k]
-                        local tv = type(v)
-                        local shown
-                        if issecretvalue and issecretvalue(v) then
-                            shown = "<secret>"
-                        elseif tv == "table" then
-                            local n = 0
-                            for _ in pairs(v) do n = n + 1 end
-                            shown = "table(" .. n .. ")"
-                        elseif tv == "string" and #v > 40 then
-                            shown = "string: " .. v:sub(1, 40) .. "..."
-                        else
-                            shown = tv .. ": " .. tostring(v)
-                        end
-                        print(PREFIX .. "  " .. k .. " = " .. shown)
-                    end
-                    -- sonde : GetGroupBuffItems, jamais sondee. Si elle rend des
-                    -- entrees par buff avec des donnees d'aura (meme secretes),
-                    -- c'est un canal en combat independant du scan des icones.
-                    if C.GetGroupBuffItems then
-                        local u = unpack or table.unpack
-                        local sigs = {
-                            { label = "()", args = {} },
-                            { label = "(2)", args = { 2 } },
-                            { label = "(2, true)", args = { 2, true } },
-                        }
-                        for _, sig in ipairs(sigs) do
-                            local ok, res = pcall(C.GetGroupBuffItems, u(sig.args))
-                            if not ok then
-                                print(PREFIX .. "  GetGroupBuffItems" .. sig.label .. " : erreur " .. tostring(res))
-                            elseif type(res) ~= "table" then
-                                print(PREFIX .. "  GetGroupBuffItems" .. sig.label .. " : " .. type(res) .. " " .. tostring(res))
-                            else
-                                local n = 0
-                                for _ in pairs(res) do n = n + 1 end
-                                print(PREFIX .. "  GetGroupBuffItems" .. sig.label .. " : table(" .. n .. ")")
-                                local shown = 0
-                                for k, v in pairs(res) do
-                                    if shown >= 3 then break end
-                                    if type(v) == "table" then
-                                        local sid = Plain(v.spellID) or Plain(v.overrideSpellID) or 0
-                                        if CDM_SPELLS[sid] then
-                                            shown = shown + 1
-                                            local parts = {}
-                                            for kk, vv in pairs(v) do
-                                                local s
-                                                if issecretvalue and issecretvalue(vv) then s = "<secret>"
-                                                elseif type(vv) == "table" then s = "table"
-                                                else s = tostring(vv) end
-                                                parts[#parts + 1] = tostring(kk) .. "=" .. s
-                                            end
-                                            print(PREFIX .. "    [" .. tostring(k) .. "] " .. table.concat(parts, " "))
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-
-                end
-            end
+            print(PREFIX .. T("the combat display is not built yet; type /mw native for details."))
         end
     elseif cmd == "native" then
         -- /mw native : etat et sonde des barres natives — a lancer EN COMBAT,
@@ -2122,34 +2017,6 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
                 .. (nativeDirty and " (reconstruction a la fin du combat)" or ""))
         end
         Update()
-    elseif cmd == "cleu" then
-        -- /mw cleu : statut du journal de combat sur ce client (reserve a
-        -- l'UI Blizzard ici) + trace si jamais des evenements arrivent.
-        if type(cleuEvents) == "table" then
-            for ev, st in pairs(cleuEvents) do print(PREFIX .. ev .. " : " .. tostring(st)) end
-        else
-            print(PREFIX .. "journal de combat : enregistrement non tente")
-        end
-        cleuTraceUntil, cleuTraceCount, cleuTraceAura, cleuTraceLast, cleuTraceRaw = time() + 20, 0, 0, nil, 0
-        print(PREFIX .. "trace du journal de combat pendant 20 s : entre en combat et frappe des ennemis, colle le resultat")
-        local glob = {}
-        for k in pairs(_G) do
-            if type(k) == "string" and k:lower():find("combatlog", 1, true) then glob[#glob + 1] = k end
-        end
-        table.sort(glob)
-        print(PREFIX .. "API CombatLog* : " .. ((#glob > 0 and table.concat(glob, ", ")) or "aucune"))
-        if C_Timer and C_Timer.After then
-            C_Timer.After(21, function()
-                local st = ""
-                if type(cleuEvents) == "table" then
-                    for ev, s in pairs(cleuEvents) do st = st .. " | " .. ev .. ": " .. tostring(s) end
-                end
-                print(PREFIX .. "journal : " .. tostring(cleuTraceCount) .. " evenements recus dont "
-                    .. tostring(cleuTraceAura) .. " auras sur toi | dernier: " .. tostring(cleuTraceLast)
-                    .. " | CombatLogGetCurrentEventInfo: " .. tostring(CombatLogGetCurrentEventInfo ~= nil)
-                    .. st)
-            end)
-        end
     elseif cmd == "log" then
         -- /mw log : relire les erreurs Lua enregistrees ; /mw log clear : vider
         db.errors = db.errors or {}
@@ -2223,9 +2090,6 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
             glowDirty = true; Update()
             print(PREFIX .. string.format(found and T("frame %s removed") or T("frame %s added"), arg))
         end
-    elseif cmd == "cdmsettings" then
-        -- /mw cdmsettings : ouvre les reglages du Cooldown Manager (diagnostic)
-        OpenCDMSettings()
     elseif cmd == "glowscan" then
         -- /mw glowscan : lister les boutons que l'addon peut surligner
         local list = CollectGlowButtons()
@@ -2266,11 +2130,6 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         NativeChanged()
         Update()
         print(PREFIX .. T("count ") .. (db.showCount and T("on") or T("off")))
-    elseif cmd == "warn" then
-        -- /mw warn : afficher ou non le texte rouge du Cooldown Manager
-        db.warnCDM = not db.warnCDM
-        Update()
-        print(PREFIX .. T("warning ") .. (db.warnCDM and T("on") or T("off")))
     elseif cmd == "lock" then
         SetUnlocked(false)
         print(PREFIX .. T("locked"))
@@ -2312,6 +2171,6 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         Update()
     else
         print(PREFIX .. "v" .. (AddonVersion() or "?") .. " rev" .. REV
-            .. " : /mw options | move | lock | always | warn | count | color | glow | glowspell | glowframe | glowscan | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <buff name> | setup | log | testerror | debug")
+            .. " : /mw options | move | lock | always | count | color | glow | glowspell | glowframe | glowscan | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <buff name> | setup | log | testerror | debug")
     end
 end
