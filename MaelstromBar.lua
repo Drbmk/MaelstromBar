@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 21 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 22 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -758,6 +758,8 @@ local function MakeCountFormatter()
     return formatter
 end
 
+local nativeVariant = "squares" -- "squares" : nos carres | "ladder" : diagnostic
+
 local function BuildNativeLayer()
     if nativeLayer or nativeUnavailable or not db then return end
     if InCombatLockdown() then return end -- creation hors combat uniquement
@@ -769,49 +771,70 @@ local function BuildNativeLayer()
         local container = CreateFrame("AuraContainer", nil, host, "CustomAuraContainerTemplate")
         container:SetUnit("player")
         local fills, nativeCount = {}, nil
-        local slot = container:AddAuraSlot("maelstrom", "HELPFUL", {
-            candidateFilters = { includeSpellIDs = {
-                [408505] = true, [408498] = true, [53817] = true, [344179] = true,
-            } },
-            initializeFrame = function(frame)
-                frame:ClearAllPoints()
-                frame:SetAllPoints(host)
-                frame:SetFrameLevel(host:GetFrameLevel() + 1)
-                pcall(frame.SetMouseClickEnabled, frame, false)
-                pcall(frame.EnableMouseMotion, frame, false)
-                -- geometrie figee a la construction (memes carres que la barre) :
-                -- /mw size marque la couche a reconstruire
-                local w = db.sqW or SQ_W
-                local h = db.sqH or SQ_H
-                local gap = db.sqGap or SQ_GAP
-                local cn = db.colorNormal or DEFAULTS.colorNormal
-                local cf = db.colorFull or DEFAULTS.colorFull
-                for i = 1, MAX_STACKS do
-                    local x = (i - 1) * (w + gap)
-                    local function NativeBar(lo, hi, level, c)
-                        local s = CreateFrame("StatusBar", nil, frame)
-                        s:SetPoint("TOPLEFT", frame, "TOPLEFT", x + 2, -2)
-                        s:SetPoint("BOTTOMRIGHT", frame, "TOPLEFT", x + w - 2, -(h - 2))
-                        s:SetFrameLevel(frame:GetFrameLevel() + level)
-                        s:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
-                        s:SetStatusBarColor(c[1], c[2], c[3], 1)
-                        -- le moteur ecrit lui-meme la valeur ; min..max = i-1..i,
-                        -- comme nos propres barres : plein des que stacks >= i
-                        frame:SetApplicationBar(s, { minApplications = lo, maxApplications = hi })
-                        return s
+        local IDS = { [408505] = true, [408498] = true, [53817] = true, [344179] = true }
+        local w = db.sqW or SQ_W
+        local h = db.sqH or SQ_H
+        local gap = db.sqGap or SQ_GAP
+        local total = MAX_STACKS * w + (MAX_STACKS - 1) * gap
+        -- un slot dedie : son frame couvre la zone donnee, une seule barre
+        -- (les setters du moteur semblent singuliers par slot), pilotee par
+        -- le moteur avec la semantique minApplications/maxApplications
+        local function MakeSlot(key, lo, hi, c, x1, y1, x2, y2, withCount)
+            local slot = container:AddAuraSlot(key, "HELPFUL", {
+                candidateFilters = { includeSpellIDs = IDS },
+                initializeFrame = function(frame)
+                    frame:ClearAllPoints()
+                    frame:SetPoint("TOPLEFT", host, "TOPLEFT", x1, y1)
+                    frame:SetPoint("BOTTOMRIGHT", host, "TOPLEFT", x2, y2)
+                    frame:SetFrameLevel(host:GetFrameLevel() + 1)
+                    pcall(frame.SetMouseClickEnabled, frame, false)
+                    pcall(frame.EnableMouseMotion, frame, false)
+                    local s = CreateFrame("StatusBar", nil, frame)
+                    s:SetAllPoints(frame)
+                    s:SetFrameLevel(frame:GetFrameLevel() + 1)
+                    s:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+                    s:SetStatusBarColor(c[1], c[2], c[3], 1)
+                    frame:SetApplicationBar(s, { minApplications = lo, maxApplications = hi })
+                    fills[#fills + 1] = { bar = s, label = key .. " (min=" .. lo .. ", max=" .. hi .. ")" }
+                    if withCount and db.showCount then
+                        -- compteur natif : le moteur ecrit le nombre lui-meme
+                        nativeCount = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+                        nativeCount:SetPoint("CENTER", host, "CENTER", 0, 0)
+                        nativeCount:SetTextColor(1, 1, 1)
+                        frame:SetApplicationCount(nativeCount, { formatter = MakeCountFormatter() })
                     end
-                    fills[i] = NativeBar(i - 1, i, 1, cn)
-                    NativeBar(MAX_STACKS - 1, MAX_STACKS, 2, cf)
-                end
-                if db.showCount then
-                    nativeCount = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-                    nativeCount:SetPoint("CENTER", frame, "CENTER", 0, 0)
-                    nativeCount:SetTextColor(1, 1, 1)
-                    frame:SetApplicationCount(nativeCount, { formatter = MakeCountFormatter() })
-                end
-            end,
-        })
-        if not slot then error("native maelstrom slot unavailable") end
+                end,
+            })
+            if not slot then error("slot " .. key .. " unavailable") end
+            return slot
+        end
+        if nativeVariant == "ladder" then
+            -- diagnostic : six slots, un par rangée, une semantique chacun.
+            -- Rouge min=0..5, orange 1..5, jaune 2..5, vert 3..5, cyan 4..5,
+            -- blanc 5..5 (la semantique exacte de ForeverTotems). La rangeree
+            -- qui bouge en combat revele la semantique ; si une seule bouge,
+            -- un seul slot peut matcher l'aura ; si aucune, le moteur ne
+            -- pilote pas nos barres du tout.
+            local rows = {
+                { 0, { 1, 0.2, 0.2 } }, { 1, { 1, 0.5, 0.2 } }, { 2, { 1, 0.9, 0.2 } },
+                { 3, { 0.3, 1, 0.3 } }, { 4, { 0.2, 0.8, 1 } }, { 5, { 1, 1, 1 } },
+            }
+            local rh = h / #rows
+            for r, cfg in ipairs(rows) do
+                MakeSlot("mwtest" .. r, cfg[1], 5, cfg[2], 0, -(r - 1) * rh, total, -(r * rh), r == 1)
+            end
+        else
+            -- nos cinq carres : deux slots par carre (remplissage min..max =
+            -- i-1..i, plein des que stacks >= i ; puis la barre "plein" 4..5
+            -- par-dessus), comme nos propres StatusBars
+            local cn = db.colorNormal or DEFAULTS.colorNormal
+            local cf = db.colorFull or DEFAULTS.colorFull
+            for i = 1, MAX_STACKS do
+                local x = (i - 1) * (w + gap)
+                MakeSlot("mwsq" .. i, i - 1, i, cn, x, 0, x + w, -h, i == 1)
+                MakeSlot("mwfull" .. i, MAX_STACKS - 1, MAX_STACKS, cf, x, 0, x + w, -h)
+            end
+        end
         nativeHost, nativeLayer = host, { host = host, fills = fills, count = nativeCount }
     end)
     if not ok then
@@ -2059,16 +2082,35 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
             end
         end
     elseif cmd == "native" then
-        -- /mw native : etat de la couche native (affichage en combat pilote
-        -- par le moteur du client, secret ou pas) ; "retry" reessaie.
-        if arg == "retry" or arg == "reessayer" then
-            nativeUnavailable = nil
+        -- /mw native : etat et sonde des barres natives — a lancer EN COMBAT,
+        -- stacks actives, pour voir ce que le moteur a ecrit. Variantes :
+        -- /mw native ladder (diagnostic de semantique), /mw native squares
+        -- (nos carres), /mw native retry (reessai apres un echec).
+        local rebuild = false
+        if arg == "ladder" or arg == "etalon" or arg == "echelle" then
+            nativeVariant, rebuild = "ladder", true
+        elseif arg == "squares" or arg == "carres" then
+            nativeVariant, rebuild = "squares", true
+        elseif arg == "retry" or arg == "reessayer" then
+            nativeUnavailable, rebuild = nil, true
+        end
+        if rebuild then
             if nativeHost then nativeHost:Hide() end
             nativeHost, nativeLayer = nil, nil
             BuildNativeLayer()
         end
         if nativeLayer then
-            print(PREFIX .. "couche native : construite, le slot Maelstrom est pilote par le moteur")
+            print(PREFIX .. "couche native : construite (variante " .. nativeVariant .. ")")
+            for _, f in ipairs(nativeLayer.fills or {}) do
+                local s = f.bar
+                local okS, sh = pcall(s.IsShown, s)
+                local okV, v = pcall(s.GetValue, s)
+                if okV and issecretvalue and issecretvalue(v) then v = "<secret>" end
+                local okM, mn, mx = pcall(s.GetMinMaxValues, s)
+                print(PREFIX .. "  " .. f.label .. " : visible=" .. ((okS and tostring(sh)) or "erreur")
+                    .. " | valeur=" .. ((okV and tostring(v)) or "erreur")
+                    .. " | minmax=" .. ((okM and (tostring(mn) .. ".." .. tostring(mx))) or "erreur"))
+            end
         elseif nativeUnavailable then
             print(PREFIX .. "couche native : indisponible (repli Cooldown Manager), /mw native retry pour reessayer")
         elseif InCombatLockdown() then
