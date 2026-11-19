@@ -1,10 +1,10 @@
 -- MaelstromBar by Petitcorps : Maelstrom Weapon stack bar (Retail style), standalone.
--- Commands: /mw options | move | lock | always | warn | color | glow | glowspell | glowframe | glowscan | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <name> | setup | log | testerror | debug
+-- Commands: /mw options | move | lock | always | warn | count | color | glow | glowspell | glowframe | glowscan | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <name> | setup | log | testerror | debug
 
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 6 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 7 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -34,6 +34,9 @@ if GetLocale() == "frFR" then
         ["locked"] = "verrouillée",
         ["active buffs (index, name, stacks, id)"] = "buffs actifs (index, nom, stacks, id)",
         ["glow "] = "halo ",
+        ["Bar background"] = "Fond de la barre",
+        ["Show the stack count on the bar (/mw count)"] = "Afficher le nombre de stacks sur la barre (/mw count)",
+        ["count "] = "compteur ",
         ["warning "] = "avertissement ",
         ["Show the Cooldown Manager warning (red text under the bar, /mw warn)"] = "Afficher l'avertissement du Gestionnaire de temps de recharge (texte rouge sous la barre, /mw warn)",
         ["on"] = "activé",
@@ -100,6 +103,8 @@ local DEFAULTS = {
     sqW = SQ_W, sqH = SQ_H, sqGap = SQ_GAP,
     colorNormal = { 0, 0.55, 1 },
     colorFull = { 0.55, 0.95, 1 },
+    colorBg = { 0.08, 0.1, 0.15 },      -- fond des carres
+    showCount = false,                   -- compteur de stacks sur la barre
     glow = true,                       -- halo sur le sort a 5 stacks
     colorGlow = { 1, 0.85, 0.2 },
     glowSpell = nil,                   -- nom ou ID ; nil = Eclair
@@ -192,6 +197,21 @@ local cdmItemLastSeen   -- horodatage de la derniere icone vue (le suivi fonctio
 local cdmValueEverRead  -- vrai : au moins une valeur de stacks lue depuis le login
 local viaCDM            -- vrai : la lecture courante des stacks passe par le Cooldown Manager
 local combatHintDone    -- message de combat deja affiche pour ce combat
+
+-- Journal de combat : repli pour lire les stacks en combat quand ni la lecture
+-- directe ni l'icone du Cooldown Manager ne fonctionnent (certains clients
+-- rendent l'icone mais refusent sa lecture). Les evenements d'aura
+-- (SPELL_AURA_APPLIED_DOSE...) portent le nombre de stacks et ne passent pas
+-- par l'API des auras. Hors combat, la lecture directe resynchronise ce
+-- decompte ; le compteur de stacks s'appuie aussi dessus, une valeur secrete
+-- ne pouvant pas etre convertie en texte.
+local cleuStacks, cleuTime
+local playerGUID
+local CLEU_AURA = {
+    SPELL_AURA_APPLIED = true, SPELL_AURA_REFRESH = true,
+    SPELL_AURA_APPLIED_DOSE = true, SPELL_AURA_REMOVED_DOSE = true,
+    SPELL_AURA_REMOVED = true,
+}
 
 local function ReadAuraFromFrame(f)
     -- Lecture seule : on n'appelle pas GetAuraData. Cette methode peut rafraichir
@@ -514,9 +534,10 @@ local function ReadStacks()
         end
     end
     if AurasSecret() then
-        viaCDM = true -- en combat, la lecture depend du Cooldown Manager
+        viaCDM = true -- en combat : Cooldown Manager d'abord, journal de combat en repli
         local v = ReadFromCooldownManager()
         if v ~= nil then return v end
+        if cleuStacks ~= nil then return cleuStacks end
         return 0
     end
     if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
@@ -557,7 +578,12 @@ local lastErr
 local function GetStacks()
     if testStacks then return testStacks end
     local ok, res = pcall(ReadStacks)
-    if ok then return res or 0 end
+    if ok then
+        if issecretvalue and issecretvalue(res) then return res end
+        -- nombre simple : resynchronise le decompte du journal de combat
+        if type(res) == "number" then cleuStacks, cleuTime = res, time() end
+        return res or 0
+    end
     if res ~= lastErr then
         lastErr = res
         print(PREFIX .. T("buff read error: ") .. tostring(res))
@@ -656,6 +682,12 @@ warn:SetTextColor(1, 0.25, 0.2)
 warn:SetText(T("Maelstrom Weapon is not tracked in the Cooldown Manager.\nThe bar stays empty in combat.  /mw setup"))
 warn:Hide()
 
+-- Compteur de stacks (option /mw count) : au centre de la barre
+local count = bar:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+count:SetPoint("CENTER", bar, "CENTER", 0, 0)
+count:SetTextColor(1, 1, 1)
+count:Hide()
+
 overlay:SetScript("OnDragStart", function() bar:StartMoving() end)
 overlay:SetScript("OnDragStop", function()
     bar:StopMovingOrSizing()
@@ -678,6 +710,13 @@ local function ApplySize()
         sq:ClearAllPoints()
         sq:SetPoint("LEFT", bar, "LEFT", (i - 1) * (w + gap), 0)
     end
+end
+
+-- Couleur de fond des carres (option /mw color bg, panneau d'options)
+local function ApplyBgColor()
+    if not db then return end
+    local c = db.colorBg or DEFAULTS.colorBg
+    for i = 1, MAX_STACKS do SetColor(squares[i].bg, c[1], c[2], c[3], 0.8) end
 end
 
 ---------------------------------------------------------------- halo sur la barre d'action
@@ -964,10 +1003,12 @@ local function Update()
     -- marge) plutot qu'une barre muette a 0. Respecte /mw warn.
     if inCombat and viaCDM and db.warnCDM and not combatHintDone then
         local now = time()
-        if now - (cdmItemLastSeen or 0) > 10 then
+        -- le journal de combat recent suffit a lire les stacks : pas d'alerte
+        local cleuOk = cleuStacks ~= nil and (now - (cleuTime or 0)) < 15
+        if not cleuOk and now - (cdmItemLastSeen or 0) > 10 then
             combatHintDone = true
             print(PREFIX .. T("in combat: Maelstrom Weapon is not in the Cooldown Manager, the stacks cannot be read. After combat, type /mw setup."))
-        elseif not cdmValueEverRead and cdmItemLastSeen and now - cdmItemLastSeen <= 2 then
+        elseif not cleuOk and not cdmValueEverRead and cdmItemLastSeen and now - cdmItemLastSeen <= 2 then
             combatHintDone = true
             print(PREFIX .. T("in combat: the Maelstrom Weapon icon of the Cooldown Manager was found but its stacks could not be read; please report this with /mw log."))
         end
@@ -985,6 +1026,21 @@ local function Update()
         return
     end
 
+    -- Compteur optionnel : une valeur secrete ne peut pas devenir du texte,
+    -- le decompte du journal de combat fournit alors le nombre
+    if db.showCount then
+        local n = stacks
+        if issecretvalue and issecretvalue(n) then n = cleuStacks end
+        if type(n) == "number" and n > 0 then
+            count:SetText(tostring(n))
+            count:Show()
+        else
+            count:Hide()
+        end
+    else
+        count:Hide()
+    end
+
     local n, f = db.colorNormal, db.colorFull
     for i = 1, MAX_STACKS do
         local sq = squares[i]
@@ -993,6 +1049,32 @@ local function Update()
         sq.fill:SetValue(stacks)
         sq.fullFill:SetValue(stacks)
     end
+end
+
+-- Decompte des stacks tenu par le journal de combat (cleuStacks) : mise a
+-- jour sur chaque evenement d'aura Maelstrom du joueur.
+local function OnCombatLog()
+    if not CombatLogGetCurrentEventInfo then return end
+    local _, cev, _, _, _, _, _, dstGUID, _, _, _, spellId, spellName, _, auraType, amount = CombatLogGetCurrentEventInfo()
+    if not CLEU_AURA[cev] then return end
+    if dstGUID ~= playerGUID then return end
+    if auraType ~= "BUFF" and auraType ~= "HELPFUL" then return end
+    if not IsMaelstromAura(spellName, spellId) then return end
+    amount = Plain(amount)
+    if cev == "SPELL_AURA_REMOVED" then
+        cleuStacks = 0
+    elseif cev == "SPELL_AURA_APPLIED" then
+        cleuStacks = (amount and amount > 0) and amount or 1
+    elseif cev == "SPELL_AURA_APPLIED_DOSE" then
+        cleuStacks = (amount and amount > 0) and amount or (cleuStacks or 0) + 1
+    elseif cev == "SPELL_AURA_REMOVED_DOSE" then
+        cleuStacks = (amount and amount >= 0) and amount or math.max((cleuStacks or 1) - 1, 0)
+    else -- SPELL_AURA_REFRESH : certains clients y mettent le compte
+        if amount and amount > 0 then cleuStacks = amount end
+        if not cleuStacks then cleuStacks = 1 end
+    end
+    cleuTime = time()
+    Update()
 end
 
 RefreshCDMWarning = function(force)
@@ -1220,11 +1302,13 @@ local function BuildOptions()
                 local r, g, b = ColorPickerFrame:GetColorRGB()
                 db[key] = { r, g, b }
                 glowDirty = true
+                if key == "colorBg" then ApplyBgColor() end
                 paint(); Update()
             end
             local function cancel()
                 db[key] = { old[1], old[2], old[3] }
                 glowDirty = true
+                if key == "colorBg" then ApplyBgColor() end
                 paint(); Update()
             end
             if ColorPickerFrame.SetupColorPickerAndShow then
@@ -1322,18 +1406,22 @@ local function BuildOptions()
         function() return db.alwaysShow end, function(v) db.alwaysShow = v; Update() end)
     Check(T("Show the Cooldown Manager warning (red text under the bar, /mw warn)"),
         function() return db.warnCDM end, function(v) db.warnCDM = v; Update() end)
+    Check(T("Show the stack count on the bar (/mw count)"),
+        function() return db.showCount end, function(v) db.showCount = v; Update() end)
 
     y = y - 6
     Label(T("Colors (/mw color)"), "GameFontNormal"); y = y - 26
     ColorRow(T("Stacks 1 to 4"), "colorNormal")
     ColorRow(T("5 stacks (maximum)"), "colorFull")
+    ColorRow(T("Bar background"), "colorBg")
     ColorRow(T("Spell glow"), "colorGlow")
     Button(T("Default colors"), 150, 16, y, function()
-        for _, key in ipairs({ "colorNormal", "colorFull", "colorGlow" }) do
+        for _, key in ipairs({ "colorNormal", "colorFull", "colorBg", "colorGlow" }) do
             local d = DEFAULTS[key]
             db[key] = { d[1], d[2], d[3] }
         end
         glowDirty = true
+        ApplyBgColor()
         for _, f in ipairs(refreshers) do f() end
         Update()
     end)
@@ -1476,6 +1564,7 @@ ev:SetScript("OnEvent", function(self, event, unit)
 
         ApplyPosition()
         ApplySize()
+        ApplyBgColor()
         BuildOptions()
         BuildGlowTargets()
         for _, e in ipairs({ "ACTIONBAR_SLOT_CHANGED", "ACTIONBAR_PAGE_CHANGED", "UPDATE_BONUS_ACTIONBAR" }) do
@@ -1485,6 +1574,11 @@ ev:SetScript("OnEvent", function(self, event, unit)
         self:RegisterEvent("PLAYER_REGEN_DISABLED")
         self:RegisterEvent("PLAYER_REGEN_ENABLED")
         self:RegisterEvent("PLAYER_ENTERING_WORLD")
+        playerGUID = (UnitGUID and UnitGUID("player")) or playerGUID
+        if CombatLogGetCurrentEventInfo then
+            -- journal de combat : repli de lecture en combat (voir OnCombatLog)
+            pcall(self.RegisterEvent, self, "COMBAT_LOG_EVENT_UNFILTERED")
+        end
 
         -- Integration au menu d'edition de l'interface (clients qui l'ont)
         if EditModeManagerFrame and EditModeManagerFrame.HookScript then
@@ -1503,6 +1597,8 @@ ev:SetScript("OnEvent", function(self, event, unit)
                 pcall(SetupCooldownManager, false)
             end)
         end
+    elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
+        OnCombatLog()
     elseif event == "UNIT_AURA" then
         if unit == "player" then Update() end
     else
@@ -1625,11 +1721,13 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         -- /mw color <r> <g> <b>  (0-1)  -> stacks 1-4 ;  /mw color full <r> <g> <b> -> 5 stacks
         local which, rest = "colorNormal", arg
         local first = arg:match("^(%a+)")
-        if first == "full" then which, rest = "colorFull", arg:gsub("^full%s*", "") end
+        if first == "full" then which, rest = "colorFull", arg:gsub("^full%s*", "")
+        elseif first == "bg" or first == "fond" then which, rest = "colorBg", arg:gsub("^" .. first .. "%s*", "") end
         local r, g, b = rest:match("([%d%.]+)%s+([%d%.]+)%s+([%d%.]+)")
         r, g, b = tonumber(r), tonumber(g), tonumber(b)
         if r and g and b and r <= 1 and g <= 1 and b <= 1 then
             db[which] = { r, g, b }
+            if which == "colorBg" then ApplyBgColor() end
             Update()
         else
             print(PREFIX .. T("/mw color [full] <r> <g> <b>  (values from 0 to 1)"))
@@ -1638,6 +1736,11 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         db.alwaysShow = not db.alwaysShow
         Update()
         print(PREFIX .. T("always show ") .. (db.alwaysShow and T("on") or T("off")))
+    elseif cmd == "count" or cmd == "compteur" then
+        -- /mw count : compteur de stacks au centre de la barre
+        db.showCount = not db.showCount
+        Update()
+        print(PREFIX .. T("count ") .. (db.showCount and T("on") or T("off")))
     elseif cmd == "warn" then
         -- /mw warn : afficher ou non le texte rouge du Cooldown Manager
         db.warnCDM = not db.warnCDM
@@ -1684,6 +1787,6 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         Update()
     else
         print(PREFIX .. "v" .. (AddonVersion() or "?") .. " rev" .. REV
-            .. " : /mw options | move | lock | always | warn | color | glow | glowspell | glowframe | glowscan | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <buff name> | setup | log | testerror | debug")
+            .. " : /mw options | move | lock | always | warn | count | color | glow | glowspell | glowframe | glowscan | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <buff name> | setup | log | testerror | debug")
     end
 end

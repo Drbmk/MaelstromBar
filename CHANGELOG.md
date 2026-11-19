@@ -1,11 +1,14 @@
 # Changelog
 
-## 1.4.1
+## 1.5.0
 
-- New: the options panel now opens with a **Cooldown Manager** section that guides the setup: it shows in color whether Maelstrom Weapon is tracked for in-combat reading (green = tracked, red = not tracked with step-by-step fix instructions, orange = Cooldown Manager disabled or cannot confirm yet, or a notice in combat). A **Check again** button enables the Cooldown Manager if needed (the addon may do that) and re-checks the tracking; the tracked buffs themselves must still be ticked by hand in the game's options, and the panel says exactly how.
-- New: in-combat diagnosis. When the bar has to read the stacks through the Cooldown Manager (in combat, on clients that hide player auras) and cannot, a chat message now explains the cause once per combat instead of the bar staying silently at 0: either Maelstrom Weapon is not in the Cooldown Manager's tracked buffs (fix it in the game's options, then `/mw setup` out of combat), or the icon is there but its stack count is unreadable (a rarer case — please report it with `/mw log`). The message respects the `/mw warn` toggle and only appears after 10 seconds of combat, so it does not fire while the first stacks are still building.
-- Fixed: the options panel now scrolls. It had grown taller than the visible area (especially with the new Cooldown Manager section), and the bottom of the panel was unreachable; the content is now built inside a scroll frame with a scrollbar and mouse-wheel support.
-- Fixed: `/mw setup` no longer claims "not tracked" when it cannot know: without active Maelstrom stacks, the Cooldown Manager's icon may simply not exist yet (especially on the Controller UI). It now says so honestly and suggests checking again right after a fight, with stacks still active. When the Cooldown Manager's catalog allows it, the tracking status is read directly from the catalog (no icon or active stacks needed), with fallback to the honest "cannot confirm" answer if the client does not expose it clearly.
+- Fixed ("does not track during combat" with the Cooldown Manager properly configured): in combat, the stacks are now also read from the **combat log** — aura events such as `SPELL_AURA_APPLIED_DOSE` carry the stack count and do not go through the aura API. It is used as a fallback when neither the direct aura read nor the Cooldown Manager's icon can be read, and requires no configuration. Out of combat, the authoritative aura read resynchronizes that count. The in-combat diagnostic messages now only appear when both paths fail.
+- New: the **background color** of the bar is configurable (options panel, "Bar background", or `/mw color bg R G B`).
+- New: an optional **stack count** displayed in the middle of the bar (options panel or `/mw count`). In combat the number comes from the combat-log count — a hidden ("secret") stack value cannot be turned into text.
+- New: the options panel opens with a **Cooldown Manager** section that guides the setup: colored status (tracked / not tracked with step-by-step fix / disabled / cannot confirm / in combat), a **Check again** button that enables the Cooldown Manager if needed and re-checks, and an **Open the Cooldown Manager settings** button that jumps to the game's settings page.
+- The tracking status can now be read without active stacks when possible: from the Cooldown Manager's catalog, or — on keyboard UIs, where the icon exists even without the buff — from the icon's absence (a gamepad UI is excluded from that conclusion, since there the icon only exists while the buff is active).
+- Fixed: the options panel now scrolls (the content had grown past the visible area).
+- `/mw setup` no longer claims "not tracked" when it cannot know; it details the Cooldown Manager API when diagnosing (`/mw cdmsettings` opens the settings page).
 
 ## 1.4.0
 
