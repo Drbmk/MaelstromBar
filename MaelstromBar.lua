@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 22 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 23 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -831,8 +831,10 @@ local function BuildNativeLayer()
             local cf = db.colorFull or DEFAULTS.colorFull
             for i = 1, MAX_STACKS do
                 local x = (i - 1) * (w + gap)
-                MakeSlot("mwsq" .. i, i - 1, i, cn, x, 0, x + w, -h, i == 1)
-                MakeSlot("mwfull" .. i, MAX_STACKS - 1, MAX_STACKS, cf, x, 0, x + w, -h)
+                -- inset de 2 px comme nos propres remplissages : le contour
+                -- (liseré + fond) du carre reste visible autour du remplissage
+                MakeSlot("mwsq" .. i, i - 1, i, cn, x + 2, -2, x + w - 2, -(h - 2), i == 1)
+                MakeSlot("mwfull" .. i, MAX_STACKS - 1, MAX_STACKS, cf, x + 2, -2, x + w - 2, -(h - 2))
             end
         end
         nativeHost, nativeLayer = host, { host = host, fills = fills, count = nativeCount }
