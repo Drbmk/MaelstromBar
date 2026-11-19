@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 7 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 8 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -1182,10 +1182,9 @@ local function OpenCDMSettings()
             end
         end
     end
-    if not (Settings and Settings.GetCategories and Settings.OpenToCategory) then
-        print(PREFIX .. "Settings API incomplete : GetCategories="
-            .. tostring(Settings and Settings.GetCategories or nil)
-            .. ", OpenToCategory=" .. tostring(Settings and Settings.OpenToCategory or nil))
+    if not (Settings and Settings.OpenToCategory) then
+        print(PREFIX .. "Settings API incomplete : OpenToCategory="
+            .. tostring(Settings and Settings.OpenToCategory or nil))
         return
     end
     local target = CDM_NAME:lower()
@@ -1205,32 +1204,59 @@ local function OpenCDMSettings()
         local ok = pcall(Settings.OpenToCategory, cat.GetID and cat:GetID() or cat)
         if not ok then pcall(Settings.OpenToCategory, cat) end
     end
-    local okS, cats = pcall(Settings.GetCategories)
-    if not okS or type(cats) ~= "table" then
-        print(PREFIX .. "Settings.GetCategories() erreur : " .. tostring(cats))
-        return fail()
-    end
     local names = {}
-    for _, cat in ipairs(cats) do
-        if type(cat) == "number" and Settings.GetCategory then
-            local okC, real = pcall(Settings.GetCategory, cat)
-            if okC and type(real) == "table" then cat = real end
-        end
-        if type(cat) == "table" then
-            local n = CatName(cat)
-            names[#names + 1] = tostring(n) or "?"
-            if Match(n) then return Open(cat) end
-            local okS2, subs = pcall(cat.GetSubcategories, cat)
-            if okS2 and type(subs) == "table" then
-                for _, sub in ipairs(subs) do
-                    local sn = CatName(sub)
-                    names[#names + 1] = (tostring(n) or "?") .. " > " .. (tostring(sn) or "?")
-                    if Match(sn) then return Open(sub) end
-                end
-            end
-        else
+    local function TryCat(cat)
+        -- renvoie vrai si la categorie correspond (et a ete ouverte)
+        if type(cat) ~= "table" then
             names[#names + 1] = "(" .. type(cat) .. ")"
+            return false
         end
+        local n = CatName(cat)
+        names[#names + 1] = tostring(n) or "?"
+        if Match(n) then Open(cat) return true end
+        local okS2, subs = pcall(cat.GetSubcategories, cat)
+        if okS2 and type(subs) == "table" then
+            for _, sub in ipairs(subs) do
+                local sn = CatName(sub)
+                names[#names + 1] = (tostring(n) or "?") .. " > " .. (tostring(sn) or "?")
+                if Match(sn) then Open(sub) return true end
+            end
+        end
+        return false
+    end
+    if Settings.GetCategories then
+        local okS, cats = pcall(Settings.GetCategories)
+        if not okS or type(cats) ~= "table" then
+            print(PREFIX .. "Settings.GetCategories() erreur : " .. tostring(cats))
+            return fail()
+        end
+        for _, cat in ipairs(cats) do
+            if type(cat) == "number" and Settings.GetCategory then
+                local okC, real = pcall(Settings.GetCategory, cat)
+                if okC and type(real) == "table" then cat = real end
+            end
+            if TryCat(cat) then return end
+        end
+    elseif Settings.GetCategory then
+        -- ce client n'a pas GetCategories : balayer les categories par ID
+        local misses = 0
+        for id = 1, 300 do
+            local okC, cat = pcall(Settings.GetCategory, id)
+            if okC and type(cat) == "table" then
+                misses = 0
+                if TryCat(cat) then return end
+            else
+                misses = misses + 1
+                if misses >= 25 then break end -- IDs epuises
+            end
+        end
+    else
+        -- aucune enumeration connue : montrer ce que ce client expose
+        local keys = {}
+        for k in pairs(Settings) do keys[#keys + 1] = tostring(k) end
+        table.sort(keys)
+        print(PREFIX .. "Settings: " .. table.concat(keys, ", "))
+        return fail()
     end
     fail(names)
 end
