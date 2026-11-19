@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 9 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 10 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -1156,6 +1156,114 @@ local function SetUnlocked(state)
     Update()
 end
 
+-- Recherche d'un bouton visible par son libelle : les noms des frames de la
+-- fenetre "Parametres avances" de ce client sont inconnus, mais ses libelles
+-- sont localises et stables. Attention, string.lower ne touche pas les lettres
+-- accentuees (multi-octets) : les motifs sont coupes avant la lettre accentuee.
+local function FrameLabelTexts(f)
+    local texts = {}
+    local function Add(t)
+        if type(t) == "string" and #t > 0 then texts[#texts + 1] = t end
+    end
+    if f.GetText then
+        local ok, t = pcall(f.GetText, f)
+        if ok then Add(t) end
+    end
+    if f.GetFontString then
+        local ok, fs = pcall(f.GetFontString, f)
+        if ok and fs and fs ~= f and fs.GetText then
+            local ok2, t = pcall(fs.GetText, fs)
+            if ok2 then Add(t) end
+        end
+    end
+    local okR, regions = pcall(f.GetRegions, f)
+    if okR and type(regions) == "table" then
+        for _, r in ipairs(regions) do
+            if r ~= f and type(r) == "table" and r.GetText then
+                local ok2, t = pcall(r.GetText, r)
+                if ok2 then Add(t) end
+            end
+        end
+    end
+    return texts
+end
+
+local function FindButtonsBy(predicate)
+    -- parcourt les frames visibles et rend les boutons dont un libelle
+    -- correspond, avec la liste de tous les libelles vus (diagnostic)
+    local found, labels = {}, {}
+    local visited = 0
+    local function Walk(f, depth)
+        if depth > 12 or visited > 5000 then return end
+        visited = visited + 1
+        if type(f) == "table" and f.IsVisible and f.GetChildren then
+            local okV, vis = pcall(f.IsVisible, f)
+            if okV and vis then
+                local isBtn = false
+                for _, objType in ipairs({ "Button", "CheckButton" }) do
+                    local ok, is = pcall(f.IsObjectType, f, objType)
+                    if ok and is then isBtn = true end
+                end
+                if isBtn and f.Click then
+                    for _, t in ipairs(FrameLabelTexts(f)) do
+                        labels[#labels + 1] = t
+                        if predicate(t:lower()) then found[#found + 1] = { frame = f, label = t } end
+                    end
+                end
+                for _, c in ipairs({ f:GetChildren() }) do Walk(c, depth + 1) end
+            end
+        end
+    end
+    Walk(UIParent, 0)
+    return found, labels
+end
+
+-- Options > Avancees > "Parametre avance" ouvre une fenetre dediee dont la
+-- section "Ameliorations" gere les buffs suivis du Cooldown Manager.
+local function ClickAdvancedSettings()
+    local found, labels = FindButtonsBy(function(n)
+        return (n:find("param", 1, true) and n:find("avanc", 1, true))
+            or (n:find("advanced", 1, true) and n:find("setting", 1, true))
+    end)
+    if #found == 0 then
+        print(PREFIX .. "« Paramètre avancé » introuvable dans Options > Avancées ; libellés des boutons visibles :")
+        local seen, line = {}, {}
+        local function flush()
+            if #line > 0 then print(PREFIX .. "  " .. table.concat(line, " | ")) end
+            line = {}
+        end
+        for _, t in ipairs(labels) do
+            if not seen[t] then
+                seen[t] = true
+                line[#line + 1] = t
+                if #table.concat(line, " | ") > 180 then flush() end
+            end
+        end
+        flush()
+        return
+    end
+    if InCombatLockdown() then
+        print(PREFIX .. "clic impossible en combat, réessaie hors combat")
+        return
+    end
+    local b = found[1]
+    pcall(b.frame.Click, b.frame)
+    print(PREFIX .. "« " .. b.label .. " » activé : recherche de la section « Améliorations »…")
+    local function openTab()
+        local tabs = FindButtonsBy(function(n)
+            return n:find("lioration", 1, true) or n:find("enhancement", 1, true)
+        end)
+        if #tabs == 0 then return end
+        if InCombatLockdown() then
+            print(PREFIX .. "section « Améliorations » trouvée mais inaccessible en combat")
+            return
+        end
+        pcall(tabs[1].frame.Click, tabs[1].frame)
+        print(PREFIX .. "section « " .. tabs[1].label .. " » ouverte")
+    end
+    if C_Timer and C_Timer.After then C_Timer.After(0.4, openTab) else openTab() end
+end
+
 -- Ouvre la page des reglages du Cooldown Manager dans les options du jeu.
 -- En cas d'echec, liste les categories vues pour diagnostiquer (commande
 -- /mw cdmsettings ou bouton du panneau d'options).
@@ -1205,6 +1313,7 @@ local function OpenCDMSettings()
         if not ok then pcall(Settings.OpenToCategory, cat) end
     end
     local names = {}
+    local advCat -- categorie "Avancees" / "Advanced" : la page y est cachee sur ce client
     local function TryCat(cat)
         -- renvoie vrai si la categorie correspond (et a ete ouverte)
         if type(cat) ~= "table" then
@@ -1216,6 +1325,10 @@ local function OpenCDMSettings()
         local subCount = (okS2 and type(subs) == "table") and #subs or -1
         names[#names + 1] = (tostring(n) or "?") .. " [" .. tostring(subCount) .. "]"
         if Match(n) then Open(cat) return true end
+        if not advCat and type(n) == "string"
+            and n:lower():find("avanc", 1, true) then
+            advCat = cat
+        end
         if okS2 and type(subs) == "table" then
             for _, sub in ipairs(subs) do
                 local sn = CatName(sub)
@@ -1258,6 +1371,18 @@ local function OpenCDMSettings()
         table.sort(keys)
         print(PREFIX .. "Settings: " .. table.concat(keys, ", "))
         return fail()
+    end
+    if advCat then
+        -- ce client n'a pas de page Cooldown Manager : elle vit dans la
+        -- fenetre "Parametres avances", derriere Options > Avancees
+        Open(advCat)
+        print(PREFIX .. "Options → Avancées ouvertes : recherche de « Paramètre avancé »…")
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0.3, ClickAdvancedSettings)
+        else
+            ClickAdvancedSettings()
+        end
+        return
     end
     fail(names)
 end
