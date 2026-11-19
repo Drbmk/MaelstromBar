@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 10 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 11 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -81,7 +81,8 @@ if GetLocale() == "frFR" then
         ["Cooldown Manager (stacks in combat)"] = "Cooldown Manager (stacks en combat)",
         ["Maelstrom Weapon is tracked in the Cooldown Manager: the bar works in combat."] = "Arme du Maelström est suivie dans le Cooldown Manager : la barre fonctionne en combat.",
         ["Maelstrom Weapon is not tracked in the Cooldown Manager: the bar stays empty in combat."] = "Arme du Maelström n'est pas suivie dans le Cooldown Manager : la barre reste vide en combat.",
-        ["Fix: press Open the Cooldown Manager settings below, then add Maelstrom Weapon to the tracked buffs by hand (an addon cannot change that list). Press Check again afterwards."] = "Correction : appuie sur « Ouvrir les réglages du Cooldown Manager » ci-dessous, puis ajoute Arme du Maelström aux buffs suivis à la main (un addon ne peut pas modifier cette liste). Appuie ensuite sur « Vérifier à nouveau ».",
+        ["Fix: press Open the Cooldown Manager settings below, then add Maelstrom Weapon to the tracked buffs by hand, in the Enhancements section of the window that opens (an addon cannot change that list). Press Check again afterwards."] = "Correction : appuie sur « Ouvrir les réglages du Cooldown Manager » ci-dessous, puis ajoute Arme du Maelström aux buffs suivis à la main, dans la section « Améliorations » de la fenêtre qui s'ouvre (un addon ne peut pas modifier cette liste). Appuie ensuite sur « Vérifier à nouveau ».",
+        ["cannot click that in combat, retry out of combat"] = "clic impossible en combat, réessaie hors combat",
         ["Open the Cooldown Manager settings"] = "Ouvrir les réglages du Cooldown Manager",
         ["Cooldown Manager settings not found: open the game options and look for them"] = "réglages du Cooldown Manager introuvables : ouvre les options du jeu et cherche-les",
         ["The Cooldown Manager cannot be checked in combat; reopen this panel out of combat."] = "Le Cooldown Manager ne peut pas être vérifié en combat ; rouvre ce panneau hors combat.",
@@ -1243,12 +1244,11 @@ local function ClickAdvancedSettings()
         return
     end
     if InCombatLockdown() then
-        print(PREFIX .. "clic impossible en combat, réessaie hors combat")
+        print(PREFIX .. T("cannot click that in combat, retry out of combat"))
         return
     end
     local b = found[1]
     pcall(b.frame.Click, b.frame)
-    print(PREFIX .. "« " .. b.label .. " » activé : recherche de la section « Améliorations »…")
     local function openTab()
         local tabs = FindButtonsBy(function(n)
             return n:find("lioration", 1, true) or n:find("enhancement", 1, true)
@@ -1259,7 +1259,6 @@ local function ClickAdvancedSettings()
             return
         end
         pcall(tabs[1].frame.Click, tabs[1].frame)
-        print(PREFIX .. "section « " .. tabs[1].label .. " » ouverte")
     end
     if C_Timer and C_Timer.After then C_Timer.After(0.4, openTab) else openTab() end
 end
@@ -1376,7 +1375,6 @@ local function OpenCDMSettings()
         -- ce client n'a pas de page Cooldown Manager : elle vit dans la
         -- fenetre "Parametres avances", derriere Options > Avancees
         Open(advCat)
-        print(PREFIX .. "Options → Avancées ouvertes : recherche de « Paramètre avancé »…")
         if C_Timer and C_Timer.After then
             C_Timer.After(0.3, ClickAdvancedSettings)
         else
@@ -1525,7 +1523,7 @@ local function BuildOptions()
             elseif s == "missing" then
                 st:SetText(T("Maelstrom Weapon is not tracked in the Cooldown Manager: the bar stays empty in combat."))
                 st:SetTextColor(1, 0.3, 0.25)
-                fix:SetText(T("Fix: press Open the Cooldown Manager settings below, then add Maelstrom Weapon to the tracked buffs by hand (an addon cannot change that list). Press Check again afterwards."))
+                fix:SetText(T("Fix: press Open the Cooldown Manager settings below, then add Maelstrom Weapon to the tracked buffs by hand, in the Enhancements section of the window that opens (an addon cannot change that list). Press Check again afterwards."))
             elseif s == "disabled" then
                 st:SetText(T("The Cooldown Manager is disabled: the stacks cannot be read in combat. Press Check again to enable it."))
                 st:SetTextColor(1, 0.55, 0.2)
