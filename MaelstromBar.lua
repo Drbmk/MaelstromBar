@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 18 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 19 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -1864,38 +1864,49 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
                         end
                         print(PREFIX .. "  " .. k .. " = " .. shown)
                     end
-                    -- sonde : le descriptif donne buffSlot ; tester si la lecture
-                    -- de l'aura par ce slot precis passe en combat (le balayage
-                    -- par index est refuse, mais un slot exact peut passer)
-                    local slot = Plain(info.buffSlot)
-                    if type(slot) == "number" and slot > 0 and C_UnitAuras then
-                        local probes = {}
-                        if C_UnitAuras.GetAuraDataBySlot then
-                            probes[#probes + 1] = { "GetAuraDataBySlot", function()
-                                return C_UnitAuras.GetAuraDataBySlot("player", slot)
-                            end }
-                        end
-                        if C_UnitAuras.GetAuraDataByIndex then
-                            probes[#probes + 1] = { "GetAuraDataByIndex", function()
-                                return C_UnitAuras.GetAuraDataByIndex("player", slot, "HELPFUL")
-                            end }
-                        end
-                        for _, p in ipairs(probes) do
-                            local ok, aura = pcall(p[2])
+                    -- sonde : GetGroupBuffItems, jamais sondee. Si elle rend des
+                    -- entrees par buff avec des donnees d'aura (meme secretes),
+                    -- c'est un canal en combat independant du scan des icones.
+                    if C.GetGroupBuffItems then
+                        local u = unpack or table.unpack
+                        local sigs = {
+                            { label = "()", args = {} },
+                            { label = "(2)", args = { 2 } },
+                            { label = "(2, true)", args = { 2, true } },
+                        }
+                        for _, sig in ipairs(sigs) do
+                            local ok, res = pcall(C.GetGroupBuffItems, u(sig.args))
                             if not ok then
-                                print(PREFIX .. "  " .. p[1] .. "(player, " .. slot .. ") : erreur " .. tostring(aura))
-                            elseif type(aura) ~= "table" then
-                                print(PREFIX .. "  " .. p[1] .. "(player, " .. slot .. ") : " .. tostring(aura))
+                                print(PREFIX .. "  GetGroupBuffItems" .. sig.label .. " : erreur " .. tostring(res))
+                            elseif type(res) ~= "table" then
+                                print(PREFIX .. "  GetGroupBuffItems" .. sig.label .. " : " .. type(res) .. " " .. tostring(res))
                             else
-                                local apps = aura.applications
-                                local appsTxt
-                                if issecretvalue and issecretvalue(apps) then appsTxt = "<secret>" else appsTxt = tostring(apps) end
-                                print(PREFIX .. "  " .. p[1] .. "(player, " .. slot .. ") : applications="
-                                    .. appsTxt .. " | name=" .. tostring(aura.name)
-                                    .. " | spellId=" .. tostring(aura.spellId))
+                                local n = 0
+                                for _ in pairs(res) do n = n + 1 end
+                                print(PREFIX .. "  GetGroupBuffItems" .. sig.label .. " : table(" .. n .. ")")
+                                local shown = 0
+                                for k, v in pairs(res) do
+                                    if shown >= 3 then break end
+                                    if type(v) == "table" then
+                                        local sid = Plain(v.spellID) or Plain(v.overrideSpellID) or 0
+                                        if CDM_SPELLS[sid] then
+                                            shown = shown + 1
+                                            local parts = {}
+                                            for kk, vv in pairs(v) do
+                                                local s
+                                                if issecretvalue and issecretvalue(vv) then s = "<secret>"
+                                                elseif type(vv) == "table" then s = "table"
+                                                else s = tostring(vv) end
+                                                parts[#parts + 1] = tostring(kk) .. "=" .. s
+                                            end
+                                            print(PREFIX .. "    [" .. tostring(k) .. "] " .. table.concat(parts, " "))
+                                        end
+                                    end
+                                end
                             end
                         end
                     end
+
                 end
             end
         end
