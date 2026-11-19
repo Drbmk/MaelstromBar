@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 8 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 9 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -1212,9 +1212,10 @@ local function OpenCDMSettings()
             return false
         end
         local n = CatName(cat)
-        names[#names + 1] = tostring(n) or "?"
-        if Match(n) then Open(cat) return true end
         local okS2, subs = pcall(cat.GetSubcategories, cat)
+        local subCount = (okS2 and type(subs) == "table") and #subs or -1
+        names[#names + 1] = (tostring(n) or "?") .. " [" .. tostring(subCount) .. "]"
+        if Match(n) then Open(cat) return true end
         if okS2 and type(subs) == "table" then
             for _, sub in ipairs(subs) do
                 local sn = CatName(sub)
