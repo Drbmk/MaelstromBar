@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 28 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 29 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -144,6 +144,7 @@ end
 -- moteur un objet duree (valeur secrete) qui pilote la bande sans la lire.
 local auraTiming     -- { duration, expiration } ou nil (secret / sans duree)
 local mwInstanceID   -- instance de l'aura, lue hors combat uniquement
+local lastAuraUpdateInfo -- derniere charge utile UNIT_AURA (sonde /mw timerdebug)
 
 local function ReadStacks()
     -- Lecture directe par ID (la plus fiable). "applications" peut etre une valeur
@@ -1349,7 +1350,10 @@ ev:SetScript("OnEvent", function(self, event, unit, ...)
         Update()
         StartRealtimeUpdates()
     elseif event == "UNIT_AURA" then
-        if unit == "player" then Update() end
+        if unit == "player" then
+            lastAuraUpdateInfo = ... -- charge utile (clients recents), sonde /mw timerdebug
+            Update()
+        end
     else
         if event == "PLAYER_REGEN_ENABLED" then
             -- couleurs, compteur ou halos changes en combat : reconstruire
@@ -1429,6 +1433,89 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
                 .. (nativeDirty and " (reconstruction a la fin du combat)" or ""))
         end
         Update()
+    elseif cmd == "timerdebug" then
+        -- /mw timerdebug : sonde de la bande du temps. A lancer avec des stacks
+        -- actives, hors combat d'abord, puis en combat, et comparer les sorties.
+        local function desc(v, k)
+            if v == nil then return k .. "=nil" end
+            if issecretvalue and issecretvalue(v) then return k .. "=<secret>" end
+            return k .. "=" .. tostring(v)
+        end
+        print(PREFIX .. "GetTime()=" .. tostring(GetTime())
+            .. " | combat=" .. tostring(UnitAffectingCombat("player")))
+        local a
+        if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
+            for id in pairs(SPELL_IDS) do
+                local okA, r = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
+                if okA and r then a = r break end
+            end
+        end
+        if not a then
+            print(PREFIX .. "aura introuvable ou lecture refusee")
+        else
+            print(PREFIX .. desc(a.applications, "applications") .. "  "
+                .. desc(a.duration, "duration") .. "  "
+                .. desc(a.expirationTime, "expiration") .. "  "
+                .. desc(a.auraInstanceID, "instance"))
+        end
+        print(PREFIX .. "auraTiming: " .. (auraTiming
+            and ("duration=" .. tostring(auraTiming.duration)
+                .. " expiration=" .. tostring(auraTiming.expiration)) or "nil"))
+        print(PREFIX .. "mwInstanceID: " .. tostring(mwInstanceID))
+        print(PREFIX .. "charge UNIT_AURA : " .. tostring(lastAuraUpdateInfo))
+        if type(lastAuraUpdateInfo) == "table" then
+            local parts = {}
+            for k, v in pairs(lastAuraUpdateInfo) do
+                local tv = type(v)
+                if tv == "table" then parts[#parts + 1] = k .. "(#" .. #v .. ")"
+                elseif tv == "boolean" then parts[#parts + 1] = k .. "=" .. tostring(v)
+                else parts[#parts + 1] = k .. "(" .. tv .. ")" end
+            end
+            print(PREFIX .. "  cles : " .. table.concat(parts, ", "))
+            -- listes d'instances : si elles sont lisibles en combat, l'addon peut
+            -- suivre les reapplications du buff sans lire l'aura elle-meme
+            for _, k in ipairs({ "updatedAuraInstanceIDs", "removedAuraInstanceIDs", "addedAuras" }) do
+                local list = lastAuraUpdateInfo[k]
+                if type(list) == "table" then
+                    local shown = {}
+                    for i, id in ipairs(list) do
+                        if i > 10 then shown[#shown + 1] = "..."; break end
+                        if type(id) == "table" then
+                            local sid = id.spellId
+                            shown[#shown + 1] = (issecretvalue and issecretvalue(sid)) and "aura<secret>" or ("aura" .. tostring(sid))
+                        else
+                            shown[#shown + 1] = (issecretvalue and issecretvalue(id)) and "<secret>" or tostring(id)
+                        end
+                    end
+                    print(PREFIX .. "  " .. k .. " : " .. table.concat(shown, ", "))
+                end
+            end
+        end
+        print(PREFIX .. "GetAuraDuration: " .. tostring(C_UnitAuras and C_UnitAuras.GetAuraDuration)
+            .. " | SetTimerDuration: " .. tostring(timerBar.SetTimerDuration)
+            .. " | direction: " .. tostring(Enum and Enum.StatusBarTimerDirection))
+        if mwInstanceID and C_UnitAuras and C_UnitAuras.GetAuraDuration then
+            local ok, obj = pcall(C_UnitAuras.GetAuraDuration, "player", mwInstanceID)
+            print(PREFIX .. "objet duree : ok=" .. tostring(ok) .. " obj=" .. tostring(obj)
+                .. " type=" .. type(obj))
+            if ok and obj and timerBar.SetTimerDuration then
+                local okS = pcall(function()
+                    timerBar:SetTimerDuration(obj, nil,
+                        Enum and Enum.StatusBarTimerDirection and Enum.StatusBarTimerDirection.RemainingTime)
+                end)
+                print(PREFIX .. "SetTimerDuration : " .. tostring(okS))
+            end
+        end
+        print(PREFIX .. "timerBar : visible=" .. tostring(timerBar:IsShown())
+            .. " valeur=" .. tostring(timerBar:GetValue())
+            .. " natif=" .. tostring(timerNative)
+            .. " statique=" .. tostring(timerStatic))
+        if C_Timer and C_Timer.After then
+            C_Timer.After(1, function()
+                print(PREFIX .. "timerBar apres 1 s : valeur=" .. tostring(timerBar:GetValue())
+                    .. " (si identique, la bande n'est pas animee)")
+            end)
+        end
     elseif cmd == "log" then
         -- /mw log : relire les erreurs Lua enregistrees ; /mw log clear : vider
         db.errors = db.errors or {}
