@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.1
+
+- Fixed a performance issue reported in 1.5.0: every action-bar event — the client fires one on every spell cast, to update cooldowns — made the action-bar glow rescan the buttons and rebuild its engine-driven combat drivers, destroying and recreating them for nothing, including during combat. The glow now only rebuilds out of combat, at most once per second; changing colors, the tracked spell or options still applies instantly. The stack-reading poll (~20 readings per second) is also suspended during combat on clients where the game engine itself displays the stacks: reads are blocked there anyway, the display loses nothing.
+- No feature change: the combat display, the count and the glow work exactly as in 1.5.0.
+
 ## 1.5.0
 
 - **In combat, the display is now powered by the game engine itself** ("does not track during combat" is fixed for good). On clients that hide player auras from addons, MaelstromBar no longer tries to read the stacks in combat: it lets the client's own aura engine fill the squares, write the stack count and light the glow — the same mechanism the game uses for its own UI. **Zero configuration**: the Cooldown Manager is not needed anymore, and the addon never touches the game's settings. Out of combat, nothing changes (direct aura reads, as always). The combat display is prepared out of combat, so if the addon loads during a fight, it is ready as soon as that fight ends.
