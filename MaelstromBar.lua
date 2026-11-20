@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 29 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 30 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -329,12 +329,11 @@ ApplyCountPos()
 
 -- Bande du temps restant du buff (option /mw timer) : fine bande verte sous
 -- les carres, elle se vide au fil du temps. Hors combat, on l'anime nous-memes
--- depuis expirationTime ; en combat, les valeurs sont secretes mais le moteur
--- du client sait piloter une StatusBar par un objet duree (SetTimerDuration,
--- meme mecanisme que les cadrans de l'UI du jeu) : on lui confie la bande.
--- Le pilote natif s'appuie sur l'instance de l'aura cachee hors combat ; si
--- le buff est reapplique en combat (nouvelle instance inconnue), la bande
--- s'efface jusqu'a la prochaine lecture possible.
+-- depuis expirationTime ; en combat, la lecture des durees etant refusee aux
+-- addons (valeurs secretes), c'est la couche native qui prend le relais : un
+-- slot dedie ou le moteur remplit la bande (barre d'application) et la
+-- consomme avec le temps (SetDurationCooldown, comme les cadrans du jeu).
+-- Notre bande se cache alors pour laisser la place a la sienne.
 local timerBar = CreateFrame("StatusBar", nil, bar)
 timerBar:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", 0, -3)
 timerBar:SetPoint("TOPRIGHT", bar, "BOTTOMRIGHT", 0, -3)
@@ -348,8 +347,7 @@ local timerBg = bar:CreateTexture(nil, "BORDER") -- liseré sombre autour de la 
 timerBg:SetPoint("TOPLEFT", timerBar, "TOPLEFT", -1, 1)
 timerBg:SetPoint("BOTTOMRIGHT", timerBar, "BOTTOMRIGHT", 1, -1)
 SetColor(timerBg, 0, 0, 0, 0.9)
-local timerNative      -- vrai : le moteur pilote la bande (combat)
-local timerNativeAt    -- horodatage du dernier branlement du pilote natif
+local timerStatic      -- vrai : valeur temoin (mode edition), pas d'animation
 local timerStatic      -- vrai : valeur temoin (mode edition), pas d'animation
 
 local function ApplyTimerColor()
@@ -358,21 +356,8 @@ local function ApplyTimerColor()
 end
 ApplyTimerColor()
 
-local function DriveTimerNative()
-    -- Renvoie vrai si le moteur pilote la bande. L'instance cachee hors combat
-    -- donne acces a un objet duree meme en combat : sa valeur reste secrete,
-    -- seul le moteur la lit (jamais de comparaison ni de formatage cote addon).
-    if not (mwInstanceID and C_UnitAuras and C_UnitAuras.GetAuraDuration) then return false end
-    if not (timerBar.SetTimerDuration and Enum and Enum.StatusBarTimerDirection) then return false end
-    local ok, obj = pcall(C_UnitAuras.GetAuraDuration, "player", mwInstanceID)
-    if not ok or not obj then return false end
-    local okD = pcall(timerBar.SetTimerDuration, timerBar, obj, nil,
-        Enum.StatusBarTimerDirection.RemainingTime)
-    return okD
-end
-
 timerBar:SetScript("OnUpdate", function(self)
-    if timerNative or timerStatic then return end -- moteur ou temoin
+    if timerStatic then return end -- valeur temoin, pas d'animation
     local t = auraTiming
     if not t or not t.duration or t.duration <= 0 or not t.expiration then return end
     local rem = t.expiration - GetTime()
@@ -451,6 +436,7 @@ end
 
 local nativeVariant = "squares" -- "squares" : nos carres | "ladder" : diagnostic
 local NATIVE_IDS = { [408505] = true, [408498] = true, [53817] = true, [344179] = true }
+local nativeSlotMethods -- sonde : methodes Duration/Application vues sur un slot (diagnostic)
 
 local function BuildNativeLayer()
     if nativeLayer or nativeUnavailable or not db then return end
@@ -531,6 +517,58 @@ local function BuildNativeLayer()
                 MakeSlot("mwsq" .. i, i - 1, i, cn, x + 2, -2, x + w - 2, -(h - 2), i == 1, 1)
                 MakeSlot("mwfull" .. i, MAX_STACKS - 1, MAX_STACKS, cf, x + 2, -2, x + w - 2, -(h - 2), false, 3)
             end
+        end
+        -- bande du temps restant en combat (option /mw timer) : slot dedie sous
+        -- les carres. La lecture de la duree etant refusee aux addons en combat,
+        -- le moteur pilote lui-meme les deux couches de la bande :
+        --  - un remplissage vert (barre d'application min=max=1) : plein des
+        --    qu'il y a au moins 1 stack, vide sinon — la bande disparait donc
+        --    quand le buff tombe ;
+        --  - un voile qui progresse avec la duree restante (SetDurationCooldown,
+        --    le mecanisme des cadrans de l'UI du jeu) avec un liseré clair a la
+        --    frontiere : la bande verte semble se vider au fil du temps.
+        -- Sans SetDurationCooldown sur ce client, la bande reste au moins
+        -- presente en combat (remplissage), sans consommation visible.
+        if db.showTimer ~= false then
+            local ct = db.colorTimer or DEFAULTS.colorTimer
+            local tslot = container:AddAuraSlot("mwtimer", "HELPFUL", {
+                candidateFilters = { includeSpellIDs = NATIVE_IDS },
+                initializeFrame = function(frame)
+                    frame:ClearAllPoints()
+                    frame:SetPoint("TOPLEFT", host, "BOTTOMLEFT", 0, -3)
+                    frame:SetPoint("TOPRIGHT", host, "BOTTOMRIGHT", 0, -3)
+                    frame:SetHeight(3)
+                    frame:SetFrameLevel(host:GetFrameLevel() + 1)
+                    pcall(frame.SetMouseClickEnabled, frame, false)
+                    pcall(frame.EnableMouseMotion, frame, false)
+                    -- sonde : methodes exposees par le frame du slot
+                    nativeSlotMethods = nativeSlotMethods or {}
+                    for _, m in ipairs({ "SetApplicationBar", "SetApplicationCount",
+                        "SetDurationCooldown", "SetDurationText", "SetDurationBar" }) do
+                        nativeSlotMethods[m] = (frame[m] ~= nil) or nativeSlotMethods[m]
+                    end
+                    local back = frame:CreateTexture(nil, "BACKGROUND")
+                    back:SetAllPoints(frame)
+                    back:SetTexture("Interface\\Buttons\\WHITE8X8")
+                    back:SetVertexColor(0, 0, 0, 0.9)
+                    local s = CreateFrame("StatusBar", nil, frame)
+                    s:SetAllPoints(frame)
+                    s:SetFrameLevel(frame:GetFrameLevel() + 1)
+                    s:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+                    s:SetStatusBarColor(ct[1], ct[2], ct[3], 1)
+                    frame:SetApplicationBar(s, { minApplications = 1, maxApplications = 1 })
+                    pcall(function()
+                        local cd = CreateFrame("Cooldown", nil, frame, "CooldownFrameTemplate")
+                        cd:SetAllPoints(frame)
+                        cd:SetFrameLevel(frame:GetFrameLevel() + 2)
+                        if cd.SetSwipeColor then cd:SetSwipeColor(0, 0, 0, 0.75) end
+                        if cd.SetDrawEdge then cd:SetDrawEdge(true) end
+                        pcall(cd.SetHideCountdownNumbers, cd, true)
+                        frame:SetDurationCooldown(cd)
+                    end)
+                end,
+            })
+            if not tslot then error("timer slot unavailable") end
         end
         nativeHost, nativeLayer = host, { host = host, fills = fills, count = nativeCount }
     end)
@@ -964,9 +1002,10 @@ local function Update()
     end
     if unlocked and db.showCount then countDrag:Show() else countDrag:Hide() end
 
-    -- Bande du temps restant : temoin en mode edition, pilote natif en combat
-    -- (relance au pire toutes les 0,5 s : le moteur anime entre deux relances),
-    -- notre animation hors combat. Sans duree lisible : pas de bande.
+    -- Bande du temps restant : temoin en mode edition. Hors combat, notre
+    -- animation depuis expirationTime ; en combat, c'est la bande de la couche
+    -- native (slot dedie : remplissage + voile pilotes par le moteur) qui
+    -- prend le relais — notre propre bande se cache pour lui laisser la place.
     if not db.showTimer then
         timerBar:Hide()
     elseif unlocked then
@@ -976,18 +1015,11 @@ local function Update()
     else
         timerStatic = false
         if nativeActive then
-            if not timerNativeAt or GetTime() - timerNativeAt > 0.5 then
-                timerNativeAt = GetTime()
-                timerNative = DriveTimerNative() or nil
-            end
-            if timerNative then timerBar:Show() else timerBar:Hide() end
+            timerBar:Hide()
+        elseif type(stacks) == "number" and stacks > 0 and auraTiming then
+            timerBar:Show()
         else
-            timerNative, timerNativeAt = nil, nil
-            if type(stacks) == "number" and stacks > 0 and auraTiming then
-                timerBar:Show()
-            else
-                timerBar:Hide()
-            end
+            timerBar:Hide()
         end
     end
 
@@ -1109,7 +1141,7 @@ local function BuildOptions()
                 db[key] = { r, g, b }
                 glowDirty = true
                 if key == "colorBg" then ApplyBgColor() end
-                if key == "colorTimer" then ApplyTimerColor() end
+                if key == "colorTimer" then ApplyTimerColor(); NativeChanged() end
                 if key == "colorNormal" or key == "colorFull" then NativeChanged() end
                 paint(); Update()
             end
@@ -1117,7 +1149,7 @@ local function BuildOptions()
                 db[key] = { old[1], old[2], old[3] }
                 glowDirty = true
                 if key == "colorBg" then ApplyBgColor() end
-                if key == "colorTimer" then ApplyTimerColor() end
+                if key == "colorTimer" then ApplyTimerColor(); NativeChanged() end
                 if key == "colorNormal" or key == "colorFull" then NativeChanged() end
                 paint(); Update()
             end
@@ -1170,7 +1202,7 @@ local function BuildOptions()
     Check(T("Show the stack count on the bar (/mw count)"),
         function() return db.showCount end, function(v) db.showCount = v; NativeChanged(); Update() end)
     Check(T("Show the remaining time bar (/mw timer)"),
-        function() return db.showTimer end, function(v) db.showTimer = v; Update() end)
+        function() return db.showTimer end, function(v) db.showTimer = v; NativeChanged(); Update() end)
 
     y = y - 6
     Label(T("Colors (/mw color)"), "GameFontNormal"); y = y - 26
@@ -1508,8 +1540,13 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         end
         print(PREFIX .. "timerBar : visible=" .. tostring(timerBar:IsShown())
             .. " valeur=" .. tostring(timerBar:GetValue())
-            .. " natif=" .. tostring(timerNative)
             .. " statique=" .. tostring(timerStatic))
+        if type(nativeSlotMethods) == "table" then
+            local parts = {}
+            for k, v in pairs(nativeSlotMethods) do parts[#parts + 1] = k .. "=" .. tostring(v) end
+            table.sort(parts)
+            print(PREFIX .. "methodes du slot natif : " .. table.concat(parts, ", "))
+        end
         if C_Timer and C_Timer.After then
             C_Timer.After(1, function()
                 print(PREFIX .. "timerBar apres 1 s : valeur=" .. tostring(timerBar:GetValue())
@@ -1606,6 +1643,7 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
     elseif cmd == "timer" or cmd == "temps" then
         -- /mw timer : bande du temps restant du buff, sous les carres
         db.showTimer = not db.showTimer
+        NativeChanged() -- le slot natif de la bande existe ou non selon l'option
         Update()
         print(PREFIX .. T("time bar ") .. (db.showTimer and T("on") or T("off")))
     elseif cmd == "color" or cmd == "couleur" then
@@ -1620,7 +1658,7 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         if r and g and b and r <= 1 and g <= 1 and b <= 1 then
             db[which] = { r, g, b }
             if which == "colorBg" then ApplyBgColor() end
-            if which == "colorTimer" then ApplyTimerColor() end
+            if which == "colorTimer" then ApplyTimerColor(); NativeChanged() end
             if which ~= "colorBg" and which ~= "colorTimer" then NativeChanged() end
             Update()
         else
