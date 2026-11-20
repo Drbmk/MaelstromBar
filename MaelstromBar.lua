@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 31 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 32 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -437,6 +437,7 @@ end
 local nativeVariant = "squares" -- "squares" : nos carres | "ladder" : diagnostic
 local NATIVE_IDS = { [408505] = true, [408498] = true, [53817] = true, [344179] = true }
 local nativeSlotMethods -- sonde : methodes Duration/Application vues sur un slot (diagnostic)
+local timerCdError     -- echec du branchement voile/compte a rebours (sonde /mw timerdebug)
 
 local function BuildNativeLayer()
     if nativeLayer or nativeUnavailable or not db then return end
@@ -518,20 +519,23 @@ local function BuildNativeLayer()
                 MakeSlot("mwfull" .. i, MAX_STACKS - 1, MAX_STACKS, cf, x + 2, -2, x + w - 2, -(h - 2), false, 3)
             end
         end
-        -- bande du temps restant en combat (option /mw timer) : slot dedie sous
-        -- les carres. La lecture de la duree etant refusee aux addons en combat,
-        -- le moteur pilote lui-meme les deux couches de la bande :
-        --  - un remplissage vert (barre d'application min=max=1) : plein des
-        --    qu'il y a au moins 1 stack, vide sinon — la bande disparait donc
-        --    quand le buff tombe ;
+        -- bande du temps restant en combat (option /mw timer) : conteneur
+        -- dedie. Les setters de duree du moteur peuvent etre singuliers par
+        -- conteneur (ForeverTotems n'a qu'un slot par conteneur quand il les
+        -- utilise) : la bande ne partage donc pas celui des carres. Le moteur
+        -- y pilote trois choses :
+        --  - le remplissage vert (barre d'application min=0 max=1, la
+        --    semantique du premier carre) : plein des 1 stack, vide sinon ;
         --  - un voile qui progresse avec la duree restante (SetDurationCooldown,
-        --    le mecanisme des cadrans de l'UI du jeu) avec un liseré clair a la
-        --    frontiere : la bande verte semble se vider au fil du temps.
-        -- Sans SetDurationCooldown sur ce client, la bande reste au moins
-        -- presente en combat (remplissage), sans consommation visible.
+        --    le mecanisme des cadrans de l'UI du jeu) ;
+        --  - un compte a rebours texte sous la bande (SetDurationText) : au
+        --    moins le chiffre reste garanti si le voile ne se rend pas sur
+        --    une bande de 3 px.
         if db.showTimer ~= false then
             local ct = db.colorTimer or DEFAULTS.colorTimer
-            local tslot = container:AddAuraSlot("mwtimer", "HELPFUL", {
+            local tcontainer = CreateFrame("AuraContainer", nil, host, "CustomAuraContainerTemplate")
+            tcontainer:SetUnit("player")
+            local tslot = tcontainer:AddAuraSlot("mwtimer", "HELPFUL", {
                 candidateFilters = { includeSpellIDs = NATIVE_IDS },
                 initializeFrame = function(frame)
                     frame:ClearAllPoints()
@@ -551,8 +555,7 @@ local function BuildNativeLayer()
                     back:SetAllPoints(frame)
                     back:SetTexture("Interface\\Buttons\\WHITE8X8")
                     back:SetVertexColor(0, 0, 0, 0.9)
-                    -- remplissage vert : min=0, max=1 (semantique du premier carre)
-                    -- -> plein des qu'il y a au moins 1 stack, vide sinon
+                    -- remplissage vert : plein des qu'il y a au moins 1 stack
                     local s = CreateFrame("StatusBar", nil, frame)
                     s:SetAllPoints(frame)
                     s:SetFrameLevel(frame:GetFrameLevel() + 1)
@@ -560,7 +563,7 @@ local function BuildNativeLayer()
                     s:SetStatusBarColor(ct[1], ct[2], ct[3], 1)
                     frame:SetApplicationBar(s, { minApplications = 0, maxApplications = 1 })
                     fills[#fills + 1] = { bar = s, label = "mwtimer (min=0, max=1)" }
-                    pcall(function()
+                    local okCd, errCd = pcall(function()
                         local cd = CreateFrame("Cooldown", nil, frame, "CooldownFrameTemplate")
                         cd:SetAllPoints(frame)
                         cd:SetFrameLevel(frame:GetFrameLevel() + 2)
@@ -568,7 +571,28 @@ local function BuildNativeLayer()
                         if cd.SetDrawEdge then cd:SetDrawEdge(true) end
                         pcall(cd.SetHideCountdownNumbers, cd, true)
                         frame:SetDurationCooldown(cd)
+                        -- compte a rebours texte : le moteur ecrit les secondes
+                        local txt = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                        txt:SetPoint("TOP", host, "BOTTOM", 0, -8)
+                        txt:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+                        txt:SetTextColor(1, 1, 1)
+                        local formatter
+                        if C_StringUtil and C_StringUtil.CreateNumericRuleFormatter
+                            and Enum and Enum.NumericRuleFormatRounding then
+                            local down = Enum.NumericRuleFormatRounding.Down
+                            local f = C_StringUtil.CreateNumericRuleFormatter()
+                            f:SetBreakpoints({ {
+                                threshold = 0, min = 0, step = 1, rounding = down,
+                                format = "%d",
+                                components = { { div = 1, step = 1, rounding = down } },
+                            } })
+                            formatter = f
+                        end
+                        frame:SetDurationText(txt, { textFormatter = formatter })
                     end)
+                    if not okCd then
+                        timerCdError = tostring(errCd):gsub("\n.*", "")
+                    end
                 end,
             })
             if not tslot then error("timer slot unavailable") end
@@ -1549,6 +1573,9 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
             for k, v in pairs(nativeSlotMethods) do parts[#parts + 1] = k .. "=" .. tostring(v) end
             table.sort(parts)
             print(PREFIX .. "methodes du slot natif : " .. table.concat(parts, ", "))
+        end
+        if timerCdError then
+            print(PREFIX .. "branchement voile/compte a rebours : " .. timerCdError)
         end
         if C_Timer and C_Timer.After then
             C_Timer.After(1, function()
