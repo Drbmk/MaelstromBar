@@ -1,10 +1,10 @@
 -- MaelstromBar by Petitcorps : Maelstrom Weapon stack bar (Retail style), standalone.
--- Commands: /mw options | move | lock | always | count | color | glow | glowspell | glowframe | glowscan | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <name> | setup | log | testerror | debug
+-- Commands: /mw options | move | lock | always | count | timer | color | glow | glowspell | glowframe | glowscan | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <name> | setup | log | testerror | debug
 
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 27 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 28 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -40,6 +40,10 @@ if GetLocale() == "frFR" then
         ["count position: above, center or below (/mw count pos ...)"] = "position du compteur : au-dessus, au centre ou en dessous (/mw count pos …)",
         ["count offset: "] = "décalage du compteur : ",
         ["count offset: /mw count offset x y (pixels)"] = "décalage : /mw count offset x y (pixels)",
+        ["Show the remaining time bar (/mw timer)"] = "Afficher la bande du temps restant (/mw timer)",
+        ["Remaining time bar"] = "Bande du temps restant",
+        ["time bar "] = "bande du temps ",
+        ["/mw color [full|bg|timer] <r> <g> <b>  (values from 0 to 1)"] = "/mw color [full|bg|timer] <r> <g> <b>  (valeurs de 0 à 1)",
         ["on"] = "activé",
         ["off"] = "désactivé",
         ["glow on "] = "halo sur ",
@@ -53,7 +57,6 @@ if GetLocale() == "frFR" then
         ["no button found for the glow; hover the button and use /fstack, then /mw glowframe <FrameName>"] = "aucun bouton trouvé pour le halo ; survole le bouton avec /fstack, puis /mw glowframe <NomDeFrame>",
         ["%d button(s) found for the glow:"] = "%d bouton(s) trouvé(s) pour le halo :",
         ["options panel unavailable"] = "panneau d'options indisponible",
-        ["/mw color [full] <r> <g> <b>  (values from 0 to 1)"] = "/mw color [full] <r> <g> <b>  (valeurs de 0 à 1)",
         ["always show "] = "affichage permanent ",
         ["position and size reset"] = "position et taille réinitialisées",
         ["test "] = "test ",
@@ -88,6 +91,8 @@ local DEFAULTS = {
     colorNormal = { 0, 0.55, 1 },
     colorFull = { 0.55, 0.95, 1 },
     colorBg = { 0.08, 0.1, 0.15 },      -- fond des carres
+    showTimer = true,                    -- bande du temps restant sous les carres
+    colorTimer = { 0.25, 0.85, 0.4 },    -- couleur de la bande du temps
     showCount = false,                   -- compteur de stacks sur la barre
     glow = true,                       -- halo sur le sort a 5 stacks
     colorGlow = { 1, 0.85, 0.2 },
@@ -133,16 +138,35 @@ local function IsMaelstromAura(name, spellId)
     return false
 end
 
+-- Etat du timer (bande du temps restant, option /mw timer) : auraTiming
+-- memorise duree/expiration lues hors combat ; mwInstanceID est l'instance de
+-- l'aura, cachee tant qu'elle est lisible — en combat, elle sert a demander au
+-- moteur un objet duree (valeur secrete) qui pilote la bande sans la lire.
+local auraTiming     -- { duration, expiration } ou nil (secret / sans duree)
+local mwInstanceID   -- instance de l'aura, lue hors combat uniquement
+
 local function ReadStacks()
     -- Lecture directe par ID (la plus fiable). "applications" peut etre une valeur
     -- secrete (liste blanche Blizzard) : on la renvoie telle quelle, la StatusBar l'accepte.
     -- En combat, ce client interdit toute lecture aux addons (valeurs secretes) :
     -- la lecture echoue alors proprement et l'affichage passe par la couche native.
+    auraTiming = nil -- repart de zero : l'aura peut etre tombee depuis la derniere lecture
     if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
         for id in pairs(SPELL_IDS) do
             local okA, a = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
             if okA and a then
                 local c = a.applications
+                -- cache du timer : duree/expiration (hors combat) + instance
+                local dur, exp = a.duration, a.expirationTime
+                local secretT = issecretvalue and ((dur ~= nil and issecretvalue(dur)) or (exp ~= nil and issecretvalue(exp)))
+                if secretT then
+                    auraTiming = nil
+                elseif (dur or 0) > 0 and exp then
+                    auraTiming = { duration = dur, expiration = exp }
+                end -- sinon : aura sans duree, pas de bande de temps
+                if not (issecretvalue and a.auraInstanceID ~= nil and issecretvalue(a.auraInstanceID)) then
+                    mwInstanceID = a.auraInstanceID
+                end
                 if issecretvalue and issecretvalue(c) then return c end
                 if not (c and c > 0) then c = 1 end
                 return c
@@ -292,7 +316,7 @@ local function CountAnchor()
     local x = db and db.countX or 0
     local y = db and db.countY or 0
     if pos == "center" then return "CENTER", "CENTER", x, y end
-    if pos == "bottom" then return "TOP", "BOTTOM", x, y - 4 end
+    if pos == "bottom" then return "TOP", "BOTTOM", x, y - 9 end -- degage la bande du temps (-3..-5 px)
     return "BOTTOM", "TOP", x, y + 4
 end
 local function ApplyCountPos()
@@ -301,6 +325,59 @@ local function ApplyCountPos()
     count:SetPoint(p, bar, rp, x, y)
 end
 ApplyCountPos()
+
+-- Bande du temps restant du buff (option /mw timer) : fine bande verte sous
+-- les carres, elle se vide au fil du temps. Hors combat, on l'anime nous-memes
+-- depuis expirationTime ; en combat, les valeurs sont secretes mais le moteur
+-- du client sait piloter une StatusBar par un objet duree (SetTimerDuration,
+-- meme mecanisme que les cadrans de l'UI du jeu) : on lui confie la bande.
+-- Le pilote natif s'appuie sur l'instance de l'aura cachee hors combat ; si
+-- le buff est reapplique en combat (nouvelle instance inconnue), la bande
+-- s'efface jusqu'a la prochaine lecture possible.
+local timerBar = CreateFrame("StatusBar", nil, bar)
+timerBar:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", 0, -3)
+timerBar:SetPoint("TOPRIGHT", bar, "BOTTOMRIGHT", 0, -3)
+timerBar:SetHeight(3)
+timerBar:SetFrameLevel(bar:GetFrameLevel() + 1)
+timerBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+timerBar:SetMinMaxValues(0, 1)
+timerBar:SetValue(1)
+timerBar:Hide()
+local timerBg = bar:CreateTexture(nil, "BORDER") -- liseré sombre autour de la bande
+timerBg:SetPoint("TOPLEFT", timerBar, "TOPLEFT", -1, 1)
+timerBg:SetPoint("BOTTOMRIGHT", timerBar, "BOTTOMRIGHT", 1, -1)
+SetColor(timerBg, 0, 0, 0, 0.9)
+local timerNative      -- vrai : le moteur pilote la bande (combat)
+local timerNativeAt    -- horodatage du dernier branlement du pilote natif
+local timerStatic      -- vrai : valeur temoin (mode edition), pas d'animation
+
+local function ApplyTimerColor()
+    local c = (db and db.colorTimer) or DEFAULTS.colorTimer
+    timerBar:SetStatusBarColor(c[1], c[2], c[3], 1)
+end
+ApplyTimerColor()
+
+local function DriveTimerNative()
+    -- Renvoie vrai si le moteur pilote la bande. L'instance cachee hors combat
+    -- donne acces a un objet duree meme en combat : sa valeur reste secrete,
+    -- seul le moteur la lit (jamais de comparaison ni de formatage cote addon).
+    if not (mwInstanceID and C_UnitAuras and C_UnitAuras.GetAuraDuration) then return false end
+    if not (timerBar.SetTimerDuration and Enum and Enum.StatusBarTimerDirection) then return false end
+    local ok, obj = pcall(C_UnitAuras.GetAuraDuration, "player", mwInstanceID)
+    if not ok or not obj then return false end
+    local okD = pcall(timerBar.SetTimerDuration, timerBar, obj, nil,
+        Enum.StatusBarTimerDirection.RemainingTime)
+    return okD
+end
+
+timerBar:SetScript("OnUpdate", function(self)
+    if timerNative or timerStatic then return end -- moteur ou temoin
+    local t = auraTiming
+    if not t or not t.duration or t.duration <= 0 or not t.expiration then return end
+    local rem = t.expiration - GetTime()
+    if rem <= 0 then self:SetValue(0); self:Hide() return end
+    self:SetValue(math.min(1, rem / t.duration))
+end)
 
 overlay:SetScript("OnDragStart", function() bar:StartMoving() end)
 overlay:SetScript("OnDragStop", function()
@@ -886,6 +963,33 @@ local function Update()
     end
     if unlocked and db.showCount then countDrag:Show() else countDrag:Hide() end
 
+    -- Bande du temps restant : temoin en mode edition, pilote natif en combat
+    -- (relance au pire toutes les 0,5 s : le moteur anime entre deux relances),
+    -- notre animation hors combat. Sans duree lisible : pas de bande.
+    if not db.showTimer then
+        timerBar:Hide()
+    elseif unlocked then
+        timerStatic = true
+        timerBar:SetValue(0.65)
+        timerBar:Show()
+    else
+        timerStatic = false
+        if nativeActive then
+            if not timerNativeAt or GetTime() - timerNativeAt > 0.5 then
+                timerNativeAt = GetTime()
+                timerNative = DriveTimerNative() or nil
+            end
+            if timerNative then timerBar:Show() else timerBar:Hide() end
+        else
+            timerNative, timerNativeAt = nil, nil
+            if type(stacks) == "number" and stacks > 0 and auraTiming then
+                timerBar:Show()
+            else
+                timerBar:Hide()
+            end
+        end
+    end
+
     if nativeActive then
         -- le moteur natif remplit les barres du slot : cachons les notres
         nativeHost:SetAlpha(1)
@@ -1004,6 +1108,7 @@ local function BuildOptions()
                 db[key] = { r, g, b }
                 glowDirty = true
                 if key == "colorBg" then ApplyBgColor() end
+                if key == "colorTimer" then ApplyTimerColor() end
                 if key == "colorNormal" or key == "colorFull" then NativeChanged() end
                 paint(); Update()
             end
@@ -1011,6 +1116,7 @@ local function BuildOptions()
                 db[key] = { old[1], old[2], old[3] }
                 glowDirty = true
                 if key == "colorBg" then ApplyBgColor() end
+                if key == "colorTimer" then ApplyTimerColor() end
                 if key == "colorNormal" or key == "colorFull" then NativeChanged() end
                 paint(); Update()
             end
@@ -1062,20 +1168,24 @@ local function BuildOptions()
         function() return db.alwaysShow end, function(v) db.alwaysShow = v; Update() end)
     Check(T("Show the stack count on the bar (/mw count)"),
         function() return db.showCount end, function(v) db.showCount = v; NativeChanged(); Update() end)
+    Check(T("Show the remaining time bar (/mw timer)"),
+        function() return db.showTimer end, function(v) db.showTimer = v; Update() end)
 
     y = y - 6
     Label(T("Colors (/mw color)"), "GameFontNormal"); y = y - 26
     ColorRow(T("Stacks 1 to 4"), "colorNormal")
     ColorRow(T("5 stacks (maximum)"), "colorFull")
     ColorRow(T("Bar background"), "colorBg")
+    ColorRow(T("Remaining time bar"), "colorTimer")
     ColorRow(T("Spell glow"), "colorGlow")
     Button(T("Default colors"), 150, 16, y, function()
-        for _, key in ipairs({ "colorNormal", "colorFull", "colorBg", "colorGlow" }) do
+        for _, key in ipairs({ "colorNormal", "colorFull", "colorBg", "colorTimer", "colorGlow" }) do
             local d = DEFAULTS[key]
             db[key] = { d[1], d[2], d[3] }
         end
         glowDirty = true
         ApplyBgColor()
+        ApplyTimerColor()
         NativeChanged()
         for _, f in ipairs(refreshers) do f() end
         Update()
@@ -1406,21 +1516,28 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         end
     elseif cmd == "options" or cmd == "config" then
         if openOptions then openOptions() else print(PREFIX .. T("options panel unavailable")) end
+    elseif cmd == "timer" or cmd == "temps" then
+        -- /mw timer : bande du temps restant du buff, sous les carres
+        db.showTimer = not db.showTimer
+        Update()
+        print(PREFIX .. T("time bar ") .. (db.showTimer and T("on") or T("off")))
     elseif cmd == "color" or cmd == "couleur" then
         -- /mw color <r> <g> <b>  (0-1)  -> stacks 1-4 ;  /mw color full <r> <g> <b> -> 5 stacks
         local which, rest = "colorNormal", arg
         local first = arg:match("^(%a+)")
         if first == "full" then which, rest = "colorFull", arg:gsub("^full%s*", "")
+        elseif first == "timer" or first == "temps" then which, rest = "colorTimer", arg:gsub("^" .. first .. "%s*", "")
         elseif first == "bg" or first == "fond" then which, rest = "colorBg", arg:gsub("^" .. first .. "%s*", "") end
         local r, g, b = rest:match("([%d%.]+)%s+([%d%.]+)%s+([%d%.]+)")
         r, g, b = tonumber(r), tonumber(g), tonumber(b)
         if r and g and b and r <= 1 and g <= 1 and b <= 1 then
             db[which] = { r, g, b }
             if which == "colorBg" then ApplyBgColor() end
-            if which ~= "colorBg" then NativeChanged() end
+            if which == "colorTimer" then ApplyTimerColor() end
+            if which ~= "colorBg" and which ~= "colorTimer" then NativeChanged() end
             Update()
         else
-            print(PREFIX .. T("/mw color [full] <r> <g> <b>  (values from 0 to 1)"))
+            print(PREFIX .. T("/mw color [full|bg|timer] <r> <g> <b>  (values from 0 to 1)"))
         end
     elseif cmd == "always" then
         db.alwaysShow = not db.alwaysShow
@@ -1500,6 +1617,6 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
         Update()
     else
         print(PREFIX .. "v" .. (AddonVersion() or "?") .. " rev" .. REV
-            .. " : /mw options | move | lock | always | count | color | glow | glowspell | glowframe | glowscan | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <buff name> | setup | log | testerror | debug")
+            .. " : /mw options | move | lock | always | count | timer | color | glow | glowspell | glowframe | glowscan | reset | scale <n> | size <w> <h> [gap] | test <0-5> | aura <buff name> | setup | log | testerror | debug")
     end
 end
