@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 36 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 37 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -657,7 +657,11 @@ local function GlobalButtons()
     for _, f in pairs(_G) do
         if type(f) == "table" and f.GetAttribute and f.IsShown then
             local ok, isBtn = pcall(f.IsObjectType, f, "Button")
-            if ok and isBtn then found[#found + 1] = f end
+            -- isBtn peut etre un booleen secret en combat : le tester
+            -- directement leverait une erreur. Secret => on ne peut pas
+            -- savoir, on garde le bouton candidat.
+            local isSecret = ok and issecretvalue and issecretvalue(isBtn)
+            if ok and (isSecret or isBtn) then found[#found + 1] = f end
         end
     end
     globalButtons, globalButtonsTime = found, time() or 0
@@ -688,7 +692,9 @@ local function CollectGlowButtons()
     for _, f in ipairs(GlobalButtons()) do
         if not seen[f] and FrameMatchesGlow(f) then
             local ok, shown = pcall(f.IsShown, f)
-            if ok and shown then seen[f] = true; list[#list + 1] = f end
+            -- meme garde : un booleen secret ne doit jamais etre teste
+            local isSecret = ok and issecretvalue and issecretvalue(shown)
+            if ok and (isSecret or shown) then seen[f] = true; list[#list + 1] = f end
         end
     end
     return list
