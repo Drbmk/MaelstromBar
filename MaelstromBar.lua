@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 32 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 33 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -589,6 +589,17 @@ local function BuildNativeLayer()
                             formatter = f
                         end
                         frame:SetDurationText(txt, { textFormatter = formatter })
+                        -- essai : barre de duree lineaire, si le client l'expose.
+                        -- Voile sombre par-dessus le vert : la bande semble se
+                        -- vider au fil du temps (sens ajustable ensuite).
+                        if frame.SetDurationBar then
+                            local s2 = CreateFrame("StatusBar", nil, frame)
+                            s2:SetAllPoints(frame)
+                            s2:SetFrameLevel(frame:GetFrameLevel() + 3)
+                            s2:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+                            s2:SetStatusBarColor(0, 0, 0, 0.55)
+                            frame:SetDurationBar(s2)
+                        end
                     end)
                     if not okCd then
                         timerCdError = tostring(errCd):gsub("\n.*", "")
