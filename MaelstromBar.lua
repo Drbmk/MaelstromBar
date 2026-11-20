@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 33 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 34 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -1568,13 +1568,8 @@ SlashCmdList["MAELSTROMBAR"] = function(msg)
             local ok, obj = pcall(C_UnitAuras.GetAuraDuration, "player", mwInstanceID)
             print(PREFIX .. "objet duree : ok=" .. tostring(ok) .. " obj=" .. tostring(obj)
                 .. " type=" .. type(obj))
-            if ok and obj and timerBar.SetTimerDuration then
-                local okS = pcall(function()
-                    timerBar:SetTimerDuration(obj, nil,
-                        Enum and Enum.StatusBarTimerDirection and Enum.StatusBarTimerDirection.RemainingTime)
-                end)
-                print(PREFIX .. "SetTimerDuration : " .. tostring(okS))
-            end
+            -- NB : plus d'essai SetTimerDuration ici : l'essai confisquait la
+            -- bande au profit du moteur (valeur figee a 0 jusqu'au /reload).
         end
         print(PREFIX .. "timerBar : visible=" .. tostring(timerBar:IsShown())
             .. " valeur=" .. tostring(timerBar:GetValue())
