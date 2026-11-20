@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 34 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 35 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -519,23 +519,19 @@ local function BuildNativeLayer()
                 MakeSlot("mwfull" .. i, MAX_STACKS - 1, MAX_STACKS, cf, x + 2, -2, x + w - 2, -(h - 2), false, 3)
             end
         end
-        -- bande du temps restant en combat (option /mw timer) : conteneur
-        -- dedie. Les setters de duree du moteur peuvent etre singuliers par
-        -- conteneur (ForeverTotems n'a qu'un slot par conteneur quand il les
-        -- utilise) : la bande ne partage donc pas celui des carres. Le moteur
-        -- y pilote trois choses :
+        -- bande du temps restant en combat (option /mw timer) : slot dans le
+        -- CONTENEUR PRINCIPAL (un seul conteneur par aura : deux conteneurs
+        -- distincts semblaient faire traiter chaque dose deux fois par le
+        -- moteur, d'ou un remplissage transitoire un carre trop haut).
+        -- Le moteur y pilote trois choses :
         --  - le remplissage vert (barre d'application min=0 max=1, la
         --    semantique du premier carre) : plein des 1 stack, vide sinon ;
-        --  - un voile qui progresse avec la duree restante (SetDurationCooldown,
-        --    le mecanisme des cadrans de l'UI du jeu) ;
-        --  - un compte a rebours texte sous la bande (SetDurationText) : au
-        --    moins le chiffre reste garanti si le voile ne se rend pas sur
-        --    une bande de 3 px.
+        --  - un cadran de duree (SetDurationCooldown) qui, sur les clients
+        --    modernes, peut se rendre en barre lineaire (SetDisplayAsDurationBar) ;
+        --  - un compte a rebours texte sous la bande (SetDurationText).
         if db.showTimer ~= false then
             local ct = db.colorTimer or DEFAULTS.colorTimer
-            local tcontainer = CreateFrame("AuraContainer", nil, host, "CustomAuraContainerTemplate")
-            tcontainer:SetUnit("player")
-            local tslot = tcontainer:AddAuraSlot("mwtimer", "HELPFUL", {
+            local tslot = container:AddAuraSlot("mwtimer", "HELPFUL", {
                 candidateFilters = { includeSpellIDs = NATIVE_IDS },
                 initializeFrame = function(frame)
                     frame:ClearAllPoints()
@@ -567,6 +563,11 @@ local function BuildNativeLayer()
                         local cd = CreateFrame("Cooldown", nil, frame, "CooldownFrameTemplate")
                         cd:SetAllPoints(frame)
                         cd:SetFrameLevel(frame:GetFrameLevel() + 2)
+                        -- clients modernes : le cadran peut se rendre en barre de
+                        -- duree lineaire (fin bandeau qui se vide) plutot qu'en
+                        -- balayage circulaire — c'est exactement ce qu'on veut
+                        -- pour une bande de 3 px
+                        if cd.SetDisplayAsDurationBar then cd:SetDisplayAsDurationBar(true) end
                         if cd.SetSwipeColor then cd:SetSwipeColor(0, 0, 0, 0.75) end
                         if cd.SetDrawEdge then cd:SetDrawEdge(true) end
                         pcall(cd.SetHideCountdownNumbers, cd, true)
