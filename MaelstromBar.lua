@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 35 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 36 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -53,6 +53,7 @@ if GetLocale() == "frFR" then
         ["no button found for the glow; hover the button and use /fstack, then /mw glowframe <FrameName>"] = "aucun bouton trouvé pour le halo ; survole le bouton avec /fstack, puis /mw glowframe <NomDeFrame>",
         ["%d button(s) found for the glow:"] = "%d bouton(s) trouvé(s) pour le halo :",
         ["options panel unavailable"] = "panneau d'options indisponible",
+        ["/mw color [full] <r> <g> <b>  (values from 0 to 1)"] = "/mw color [full] <r> <g> <b>  (valeurs de 0 à 1)",
         ["always show "] = "affichage permanent ",
         ["position and size reset"] = "position et taille réinitialisées",
         ["test "] = "test ",
@@ -804,6 +805,7 @@ local function AttachGlowNative(btn, g)
 end
 
 local lastWant = false
+local lastGlowScan = 0 -- date du dernier balayage des boutons (limiteur d'evenements)
 local function RefreshGlow(stacks)
     -- Les halos restent poses sur les boutons tant que l'option est active ;
     -- c'est la valeur des StatusBar qui les rend visibles a 5 stacks. En
@@ -812,6 +814,7 @@ local function RefreshGlow(stacks)
     local want = db.glow and true or false
     if want ~= lastWant or glowDirty then
         lastWant, glowDirty = want, false
+        lastGlowScan = GetTime()
         HideGlows()
         ClearGlowNatives() -- boutons ou couleurs changes : pilotes obsoletes
         if want then
@@ -919,7 +922,14 @@ local updateTicker
 local function StartRealtimeUpdates()
     if updateTicker or not (C_Timer and C_Timer.NewTicker) then return end
     updateTicker = C_Timer.NewTicker(0.05, function()
-        if db and active then Update() end
+        if not (db and active) then return end
+        -- En combat sur ce client, la couche native affiche tout (moteur du
+        -- jeu) et les lectures d'aura sont refusees : le sondage ne ferait
+        -- qu'echouer 20 fois par seconde. Les transitions de combat passent
+        -- par les evenements (PLAYER_REGEN_*), un Update par evenement suffit.
+        -- Mode test ou edition : garder le rafraichissement continu.
+        if nativeLayer and InCombatLockdown() and not testStacks and not unlocked then return end
+        Update()
     end)
 end
 
@@ -1252,7 +1262,18 @@ ev:SetScript("OnEvent", function(self, event, unit, ...)
                 glowDirty = true
             end
         end
-        glowDirty = true -- barres d'action modifiees : relire les boutons
+        -- Barres d'action modifiees : relire les boutons. En combat, jamais :
+        -- rien n'y peut etre recree (les slots natifs se construisent hors
+        -- combat) et ACTIONBAR_SLOT_CHANGED tire a chaque lancer de sort —
+        -- rebalayer n'y ferait que detruire et recreer pour rien. Hors combat,
+        -- au plus une fois par seconde (le balayage global des boutons et la
+        -- recreation des pilotes natifs sont couteux). Les actions de
+        -- l'utilisateur (couleurs, options, commandes) restent immediates :
+        -- elles positionnent glowDirty directement, hors de ce limiteur.
+        if event ~= "PLAYER_REGEN_ENABLED" and not InCombatLockdown()
+            and GetTime() - lastGlowScan >= 1 then
+            glowDirty = true
+        end
         Update()
     end
 end)
