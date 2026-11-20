@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 30 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 31 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -535,9 +535,9 @@ local function BuildNativeLayer()
                 candidateFilters = { includeSpellIDs = NATIVE_IDS },
                 initializeFrame = function(frame)
                     frame:ClearAllPoints()
+                    -- deux coins explicites, comme les carres (largeur = barre, hauteur 3 px)
                     frame:SetPoint("TOPLEFT", host, "BOTTOMLEFT", 0, -3)
-                    frame:SetPoint("TOPRIGHT", host, "BOTTOMRIGHT", 0, -3)
-                    frame:SetHeight(3)
+                    frame:SetPoint("BOTTOMRIGHT", host, "BOTTOMLEFT", total, -6)
                     frame:SetFrameLevel(host:GetFrameLevel() + 1)
                     pcall(frame.SetMouseClickEnabled, frame, false)
                     pcall(frame.EnableMouseMotion, frame, false)
@@ -551,12 +551,15 @@ local function BuildNativeLayer()
                     back:SetAllPoints(frame)
                     back:SetTexture("Interface\\Buttons\\WHITE8X8")
                     back:SetVertexColor(0, 0, 0, 0.9)
+                    -- remplissage vert : min=0, max=1 (semantique du premier carre)
+                    -- -> plein des qu'il y a au moins 1 stack, vide sinon
                     local s = CreateFrame("StatusBar", nil, frame)
                     s:SetAllPoints(frame)
                     s:SetFrameLevel(frame:GetFrameLevel() + 1)
                     s:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
                     s:SetStatusBarColor(ct[1], ct[2], ct[3], 1)
-                    frame:SetApplicationBar(s, { minApplications = 1, maxApplications = 1 })
+                    frame:SetApplicationBar(s, { minApplications = 0, maxApplications = 1 })
+                    fills[#fills + 1] = { bar = s, label = "mwtimer (min=0, max=1)" }
                     pcall(function()
                         local cd = CreateFrame("Cooldown", nil, frame, "CooldownFrameTemplate")
                         cd:SetAllPoints(frame)
