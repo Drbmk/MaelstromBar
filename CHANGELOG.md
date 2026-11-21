@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.2
+
+- Fixed a slow performance degradation reported after 1.5.1: tiny FPS losses when entering and leaving combat, appearing after 15-20 minutes of play and growing over time. Cause: the engine-driven glow pilots (one aura container with three slots per highlighted button) were torn down and rebuilt on every routine glow rescan — and a rescan runs at most once per second out of combat, because the client fires an action-bar event on every spell cast. Frames and their engine-side aura slots are never destroyed in this client, so each rebuild leaked a full set of containers; the engine re-evaluates every registered slot when combat starts and ends, which made those transitions progressively more expensive. The pilots are now reused across rescans and only rebuilt when the glow color actually changes (the only setting they bake in); rebuilding the main combat layer (colors, size, count) no longer discards them either.
+
 ## 1.5.1
 
 - Fixed a performance issue reported in 1.5.0: every action-bar event — the client fires one on every spell cast, to update cooldowns — made the action-bar glow rescan the buttons and rebuild its engine-driven combat drivers, destroying and recreating them for nothing, including during combat. The glow now only rebuilds out of combat, at most once per second; changing colors, the tracked spell or options still applies instantly. The stack-reading poll (~20 readings per second) is also suspended during combat on clients where the game engine itself displays the stacks: reads are blocked there anyway, the display loses nothing.

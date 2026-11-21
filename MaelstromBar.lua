@@ -4,7 +4,7 @@
 local MAX_STACKS = 5
 local SQ_W, SQ_H, SQ_GAP = 28, 22, 3
 local BUILD = select(4, GetBuildInfo()) or 0
-local REV = 37 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
+local REV = 38 -- revision du code, affichee par /mw (la version TOC ne bouge qu'a la publication)
 
 -- Localisation : les textes sont ecrits en anglais (cle) ; frFR les traduit.
 local PREFIX = "|cff00aaffMaelstromBar|r : "
@@ -475,8 +475,9 @@ NativeChanged = function()
     if nativeHost then nativeHost:Hide() end -- l'ancienne couche est abandonnee
     nativeHost, nativeLayer = nil, nil
     BuildNativeLayer()
-    -- les pilotes natifs des halos portent la couleur du halo : les refaire
-    if ClearGlowNatives then ClearGlowNatives() end
+    -- Les pilotes natifs des halos ne dependent pas de cette couche (couleur
+    -- du halo et geometrie du bouton seulement) : un balayage les reprend
+    -- tels quels, on ne les jette pas ici.
     glowDirty = true
 end
 
@@ -812,6 +813,7 @@ end
 
 local lastWant = false
 local lastGlowScan = 0 -- date du dernier balayage des boutons (limiteur d'evenements)
+local lastGlowColor  -- couleur des pilotes natifs actuellement construits
 local function RefreshGlow(stacks)
     -- Les halos restent poses sur les boutons tant que l'option est active ;
     -- c'est la valeur des StatusBar qui les rend visibles a 5 stacks. En
@@ -822,7 +824,21 @@ local function RefreshGlow(stacks)
         lastWant, glowDirty = want, false
         lastGlowScan = GetTime()
         HideGlows()
-        ClearGlowNatives() -- boutons ou couleurs changes : pilotes obsoletes
+        -- Pilotes natifs : ne les refaire que si la couleur du halo a change,
+        -- c'est la seule donnee qu'ils integrent (la geometrie vient du
+        -- bouton, les filtres de sort sont constants). Les balayages de
+        -- routine — ACTIONBAR_SLOT_CHANGED tire a chaque lancer de sort,
+        -- limite ici a 1/s hors combat — reutilisent les pilotes existants :
+        -- une frame pilote et ses slots d'aura ne se detruisent pas, les
+        -- recreer a chaque balayage les accumulait sans fin (le moteur
+        -- reevalue tous les slots enregistres a chaque entree/sortie de
+        -- combat : micro-pertes de FPS croissantes apres un quart d'heure).
+        local c = db.colorGlow or DEFAULTS.colorGlow
+        if not lastGlowColor
+            or c[1] ~= lastGlowColor[1] or c[2] ~= lastGlowColor[2] or c[3] ~= lastGlowColor[3] then
+            lastGlowColor = { c[1], c[2], c[3] }
+            ClearGlowNatives() -- couleur changee : pilotes obsoletes
+        end
         if want then
             local c = db.colorGlow
             for _, btn in ipairs(CollectGlowButtons()) do
